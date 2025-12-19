@@ -50,6 +50,7 @@ type Expert = {
   verified: boolean;
   linkedinUrl: string;
 };
+// we need to fetch it from the backend 
 
 const allExperts: Expert[] = [
   {
@@ -152,6 +153,23 @@ const allExperts: Expert[] = [
     domain: "Marketing",
     experience: "6 Yrs",
     verified: false,
+    linkedinUrl: "https://www.linkedin.com/in/ananya-gupta",
+  },
+  {
+    id: 7,
+    name: "Abdullah",
+    role: "Marketing Head",
+    company: "Zomato",
+    companyLogo: "",
+    avatarInitial: "AG",
+    rating: 4.7,
+    reviews: 85,
+    expertise: ["Growth", "Brand"],
+    price: 2500,
+    availability: "Fri, 15 Dec",
+    domain: "Marketing",
+    experience: "6 Yrs",
+    verified: true,
     linkedinUrl: "https://www.linkedin.com/in/ananya-gupta",
   },
 ];

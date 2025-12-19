@@ -295,7 +295,29 @@ export default function StudentProjectsPage() {
   const [selectedProject, setSelectedProject] =
     useState<Project | null>(null);
 
-  const studentScore = 1300;  // Isko backend se fetch krne ka logic likhna hai abhi 
+  /** * 🔑 CHANGE: Replaced hardcoded studentScore with state and dynamic fetching logic.
+   **/
+  const [studentScore, setStudentScore] = useState<number>(0);
+  const [isLoadingScore, setIsLoadingScore] = useState(true);
+
+  useEffect(() => {
+    const fetchProfileScore = async () => {
+      try {
+        const response = await fetch('/api/profile/student');
+        const result = await response.json();
+        if (result.success && result.data?.analytics?.skillScore) {
+          setStudentScore(result.data.analytics.skillScore);
+        }
+      } catch (error) {
+        console.error("Failed to fetch student score:", error);
+      } finally {
+        setIsLoadingScore(false);
+      }
+    };
+
+    fetchProfileScore();
+  }, []);
+  /** 🔑 END CHANGE **/
 
   const filteredProjects = useMemo(() => {
     const allowedDifficulties =
@@ -324,11 +346,23 @@ export default function StudentProjectsPage() {
     "Design Gig",
   ];
 
+  if (isLoadingScore) {
+    return (
+      <div className="flex h-64 items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-zinc-500" />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
-      <h1 className="text-xl font-semibold tracking-tight">
-        Real-Time Projects
-      </h1>
+      <div className="flex justify-between items-center">
+        <h1 className="text-xl font-semibold tracking-tight">
+          Real-Time Projects
+        </h1>
+        {/* Added a small badge to show the score used for filtering */}
+        <Badge variant="secondary">Profile Score: {studentScore}</Badge>
+      </div>
 
       <Widget className="p-6">
         <div className="flex flex-col sm:flex-row gap-4 justify-between">
@@ -411,8 +445,8 @@ export default function StudentProjectsPage() {
       </section>
 
       {filteredProjects.length === 0 && (
-        <div className="text-center py-16">
-          No projects found
+        <div className="text-center py-16 text-zinc-500">
+          No projects found for your current profile score.
         </div>
       )}
 

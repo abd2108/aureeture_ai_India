@@ -175,7 +175,7 @@ const MentorOverviewPage: React.FC = () => {
   const router = useRouter();
   const { user, isLoaded, isSignedIn } = useUser();
   const [isOnline, setIsOnline] = useState(true);
-  const [isVerified] = useState(false); // placeholder until backend verification is wired
+  const [isVerified] = useState(true); // placeholder until backend verification is wired
   const [isCopyingLink, setIsCopyingLink] = useState(false);
   const [todaySessions, setTodaySessions] = useState<MentorSession[]>([]);
   const [loadingToday, setLoadingToday] = useState(true);

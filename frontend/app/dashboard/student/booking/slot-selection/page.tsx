@@ -431,7 +431,7 @@ const handleProceedToPayment = () => {
     ...Object.fromEntries(searchParams.entries()),
     // Now we use the mentor object we found
     name: mentor?.name || "Mentor",
-    price: "5000",
+    price: "1",
     role: mentor?.role || "",
     company: mentor?.company || "",
     

@@ -29,6 +29,3 @@ export const customAuthMiddleware = async (req: Request, res: Response, next: Ne
         return res.status(401).json({ success: false, error: { message: 'Unauthorized: Invalid token' }});
     }
 };
-
-
-

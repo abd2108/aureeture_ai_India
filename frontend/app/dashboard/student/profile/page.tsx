@@ -213,6 +213,9 @@ const ProfilePageDashboard: FC<ProfilePageDashboardProps> = ({
   });
 
   // Fetch profile data from backend
+
+
+
   useEffect(() => {
     const fetchProfile = async () => {
       if (!isLoaded || !user?.id || !apiBase) {
@@ -330,7 +333,7 @@ const ProfilePageDashboard: FC<ProfilePageDashboardProps> = ({
       }
     };
 
-    if (isLoaded && user?.id && apiBase && getToken) {
+    if (isLoaded && user?.id && apiBase && getToken!== null) {
       fetchProfile();
     } else if (isLoaded && user) {
       // If no API base URL, use Clerk user data

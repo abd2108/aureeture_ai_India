@@ -1,12 +1,10 @@
 import type React from "react"
 import "./globals.css"
 import type { Metadata } from "next"
-import { ThemeProvider } from "@/components/theme-provider"
-import { ClerkProvider } from "@clerk/nextjs"
 import ConditionalNavbar from "@/components/conditional-navbar"
 import ConditionalFooter from "@/components/conditional-footer"
 import SkipToContent from "@/components/skip-to-content"
-
+import Providers from "./providers";
 // Using system fonts to avoid Google Fonts loading issues
 const systemFonts = {
   inter: {
@@ -73,16 +71,7 @@ export default function RootLayout({
       className={`${systemFonts.inter.variable} ${systemFonts.mono.variable} ${systemFonts.heading.variable}`}
     >
       <body className={systemFonts.inter.className}>
-        <ClerkProvider>
-          <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
-            <SkipToContent />
-            <ConditionalNavbar />
-            <main id="main-content">
-              {children}
-            </main>
-            <ConditionalFooter />
-          </ThemeProvider>
-        </ClerkProvider>
+        <Providers>{children}</Providers>
       </body>
     </html>
   )

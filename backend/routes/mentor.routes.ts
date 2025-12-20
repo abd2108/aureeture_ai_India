@@ -1,10 +1,67 @@
 import { Router } from 'express';
+import mongoose from 'mongoose';
 import MentorSession from '../models/mentorSession.model';
 import MentorAvailability from '../models/mentorAvailability.model';
+import MenteePlan from '../models/menteePlan.model';
+import MenteeMessage from '../models/menteeMessage.model';
+import Mentorship from '../models/mentorship.model';
 import { generateAgoraToken } from '../services/agoraToken.service';
 import { sendEmail, generateSessionConfirmationEmail } from '../services/email.service';
 
 const router = Router();
+
+/**
+ * Ensure we have Mentorship documents for any sessions that already exist.
+ * This keeps backward compatibility with the previous "sessions-derived mentees" behavior.
+ */
+const ensureMentorshipsFromSessions = async (mentorId: string) => {
+  const sessions = await MentorSession.find({ mentorId }).select('studentId studentEmail studentName title').lean();
+  for (const s of sessions) {
+    const menteeEmail = (s.studentEmail || '').toLowerCase();
+    const menteeClerkId = s.studentId || undefined;
+    if (!menteeEmail && !menteeClerkId) continue;
+
+    const query: any = { mentorId };
+    if (menteeClerkId) query.menteeClerkId = menteeClerkId;
+    else query.menteeEmail = menteeEmail;
+
+    const update: any = {
+  $setOnInsert: {
+    mentorId,
+    menteeClerkId,
+    menteeEmail,
+    status: 'active',
+    // only defaults here (no conflict)
+    ...(s.studentName ? {} : { menteeName: 'Mentee' }),
+    ...(s.title ? {} : { goal: 'Career development' }),
+  },
+  $set: {
+    // always keep in sync when provided
+    ...(s.studentName ? { menteeName: s.studentName } : {}),
+    ...(s.title ? { goal: s.title } : {}),
+    updatedAt: new Date(),
+  },
+};
+
+
+    const mentorship = await Mentorship.findOneAndUpdate(query, update, {
+      upsert: true,
+      new: true,
+    });
+
+    // Link legacy plan docs (keyed by sessionId) to mentorshipId so future calls are stable
+    await MenteePlan.updateMany(
+      { mentorId, sessionId: (s as any)._id, mentorshipId: { $exists: false } },
+      { $set: { mentorshipId: mentorship._id } }
+    ).catch(() => undefined);
+  }
+};
+
+const getOrCreatePlanByMentorship = async (mentorId: string, mentorshipId: mongoose.Types.ObjectId) => {
+  const existing = await MenteePlan.findOne({ mentorId, mentorshipId });
+  if (existing) return existing;
+  return MenteePlan.create({ mentorId, mentorshipId, progress: 0, milestones: [], notes: '' });
+};
 
 // Helper to ensure demo sessions exist
 const ensureDemoSessionsForMentor = async (mentorId: string, forceCreate: boolean = false) => {
@@ -677,281 +734,336 @@ router.delete('/mentor-sessions/:id', async (req, res) => {
   }
 });
 
+// --- Mentor ↔ Mentee mapping & plan endpoints ---
+
 // GET /api/mentor-mentees
+// Returns "mentees" derived from Mentorship (stable mapping). For backward compatibility,
+// we also auto-create mentorship rows from existing MentorSession records.
 router.get('/mentor-mentees', async (req, res) => {
   try {
     const { mentorId } = req.query as { mentorId?: string };
-    if (!mentorId) {
-      return res.status(400).json({ message: 'mentorId is required' });
-    }
+    if (!mentorId) return res.status(400).json({ message: 'mentorId is required' });
+
     await ensureDemoSessionsForMentor(mentorId);
-    const sessions = await MentorSession.find({ mentorId }).sort({ startTime: -1 });
-    const menteeMap = new Map<string, any>();
-    sessions.forEach((session) => {
-      const key = session.studentId || session.studentName;
-      if (!menteeMap.has(key)) {
-        const allSessionsForMentee = sessions.filter(
-          (s) => (s.studentId || s.studentName) === key
-        );
-        
-        // Get the most recent completed or past session as lastSession
-        const pastSessions = allSessionsForMentee.filter(
-          (s) => s.status === 'completed' || s.endTime < new Date()
-        );
-        const lastSession = pastSessions.length > 0
-          ? pastSessions.sort((a, b) => {
-              const aTime = a.endedAt || a.endTime || a.startTime;
-              const bTime = b.endedAt || b.endTime || b.startTime;
-              return bTime.getTime() - aTime.getTime();
-            })[0]
-          : session; // Fallback to current session if no past sessions
-        
-        const upcomingSessions = allSessionsForMentee.filter(
-          (s) => s.startTime > new Date()
-        );
-        const nextSession = upcomingSessions.length > 0
-          ? upcomingSessions.sort((a, b) => a.startTime.getTime() - b.startTime.getTime())[0]
-          : null;
-        
-        const completedCount = allSessionsForMentee.filter(
-          (s) => s.status === 'completed'
-        ).length;
-        const totalCount = allSessionsForMentee.length;
-        const progress = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
+    await ensureMentorshipsFromSessions(mentorId);
 
-        /** * FIX START: Updated Status Logic 
-         * Mentee is 'New' if they have no completed sessions AND no paid upcoming sessions.
-         * Mentee is 'Active' if they have a confirmed (non-draft) upcoming session.
-         **/
-        let status: 'Active' | 'Paused' | 'New' = 'New';
-        if (nextSession && (nextSession.status as string) !== 'draft') {
-          status = 'Active';
-        } else if (completedCount > 0) {
-          status = 'Paused';
-        } else {
-          status = 'New';
-        }
-        /** FIX END **/
+    const mentorships = await Mentorship.find({ mentorId }).sort({ updatedAt: -1 }).lean();
+    const sessions = await MentorSession.find({ mentorId }).sort({ startTime: -1 }).lean();
 
-        // Format last session date: "12 Dec 2025"
-        const formatLastSession = (session: any) => {
-          const date = session.endedAt || session.endTime || session.startTime;
-          const day = date.getDate();
-          const month = date.toLocaleDateString('en-GB', { month: 'short' });
-          const year = date.getFullYear();
-          return `${day} ${month} ${year}`;
-        };
-
-        // Format next session date: "18 Dec, 7:30 PM"
-        const formatNextSession = (date: Date) => {
-          const day = date.getDate();
-          const month = date.toLocaleDateString('en-GB', { month: 'short' });
-          const hours = date.getHours();
-          const minutes = date.getMinutes();
-          const ampm = hours >= 12 ? 'PM' : 'AM';
-          const displayHours = hours % 12 || 12;
-          const displayMinutes = minutes.toString().padStart(2, '0');
-          return `${day} ${month}, ${displayHours}:${displayMinutes} ${ampm}`;
-        };
-
-        menteeMap.set(key, {
-          id: session.studentId || `mentee-${key}`,
-          name: session.studentName,
-          email: session.studentEmail,
-          avatarUrl: `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(session.studentName)}`,
-          goal: session.title || session.description || 'Career development',
-          progress,
-          lastSession: formatLastSession(lastSession) || 'Never',
-          nextSession: (nextSession && (nextSession.status as string) !== 'draft') ? formatNextSession(nextSession.startTime) : undefined,
-          status,
-          studentId: session.studentId,
-        });
-      }
-    });
-    const mentees = Array.from(menteeMap.values());
-    res.json({ mentees, total: mentees.length });
-  } catch (error) {
-    console.error('Error fetching mentor mentees:', error);
-    res.status(500).json({ message: 'An error occurred on the server.' });
-  }
-});
-
-// POST /api/mentor-mentees - Add a new mentee
-router.post('/mentor-mentees', async (req, res) => {
-  try {
-    const { mentorId, name, email, goal, status } = req.body;
-    if (!mentorId || !name || !email || !goal) {
-      return res.status(400).json({
-        message: 'mentorId, name, email, and goal are required.',
-      });
-    }
-
-    // Create a placeholder session for this mentee
-    // This allows the mentee to appear in the mentees list
-    // The session is scheduled far in the future as a placeholder
-    const futureDate = new Date();
-    futureDate.setFullYear(futureDate.getFullYear() + 1); // 1 year from now
-    const endDate = new Date(futureDate);
-    endDate.setHours(endDate.getHours() + 1);
-
-    const studentId = `student_${name.toLowerCase().replace(/\s+/g, '_')}_${Date.now()}`;
-
-    const session = await MentorSession.create({
-      mentorId,
-      studentName: name,
-      studentEmail: email,
-      studentId,
-      title: goal,
-      description: `Mentoring relationship for ${name}`,
-      startTime: futureDate,
-      endTime: endDate,
-      durationMinutes: 60,
-      status: 'draft',
-      paymentStatus: 'pending',
-      bookingType: 'manual',
-    });
-
-
-    // Return mentee object in the format expected by frontend
-    const mentee = {
-      id: studentId,
-      name: session.studentName,
-      email: session.studentEmail,
-      avatarUrl: `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(session.studentName)}`,
-      goal: session.title,
-      progress: 0,
-      lastSession: 'Never',
-      status: 'New', // 🔑 Strictly set to 'New' for the initial return
-      studentId: session.studentId,
+    const byKey = (m: any) => m.menteeClerkId || m.menteeEmail;
+    const formatLast = (date: Date) => {
+      const day = date.getDate();
+      const month = date.toLocaleDateString('en-GB', { month: 'short' });
+      const year = date.getFullYear();
+      return `${day} ${month} ${year}`;
+    };
+    const formatNext = (date: Date) => {
+      const day = date.getDate();
+      const month = date.toLocaleDateString('en-GB', { month: 'short' });
+      const hours = date.getHours();
+      const minutes = date.getMinutes();
+      const ampm = hours >= 12 ? 'PM' : 'AM';
+      const displayHours = hours % 12 || 12;
+      const displayMinutes = minutes.toString().padStart(2, '0');
+      return `${day} ${month}, ${displayHours}:${displayMinutes} ${ampm}`;
     };
 
-    res.status(201).json(mentee);
+    // Load all plans for this mentor keyed by mentorshipId (fast)
+    const planDocs = await MenteePlan.find({ mentorId, mentorshipId: { $exists: true } }).lean();
+    const planByMentorship = new Map<string, any>(planDocs.map((p: any) => [String(p.mentorshipId), p]));
+
+    const mentees = mentorships.map((m: any) => {
+      const key = byKey(m);
+      const related = sessions.filter((s: any) => {
+        if (m.menteeClerkId && s.studentId === m.menteeClerkId) return true;
+        if (m.menteeEmail && (s.studentEmail || '').toLowerCase() === (m.menteeEmail || '').toLowerCase()) return true;
+        return false;
+      });
+
+      const now = new Date();
+      const past = related.filter((s: any) => s.status === 'completed' || new Date(s.endTime) < now);
+      const last = past.length ? past.sort((a: any, b: any) => new Date((b.endedAt || b.endTime || b.startTime)).getTime() - new Date((a.endedAt || a.endTime || a.startTime)).getTime())[0] : null;
+
+      const upcoming = related.filter((s: any) => new Date(s.startTime) > now && String(s.status) !== 'draft');
+      const next = upcoming.length ? upcoming.sort((a: any, b: any) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime())[0] : null;
+
+      const completedCount = related.filter((s: any) => s.status === 'completed').length;
+      const totalCount = related.filter((s: any) => String(s.status) !== 'draft').length;
+      const computedProgress = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
+
+      const plan = planByMentorship.get(String(m._id));
+      const progress = typeof plan?.progress === 'number' ? plan.progress : computedProgress;
+
+      let status: 'Active' | 'Paused' | 'New' = 'New';
+      if (next) status = 'Active';
+      else if (completedCount > 0) status = 'Paused';
+
+      return {
+        id: String(m._id),
+        name: m.menteeName,
+        email: m.menteeEmail,
+        avatarUrl: `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(m.menteeName || 'Mentee')}`,
+        goal: m.goal || 'Career development',
+        progress,
+        lastSession: last ? formatLast(new Date(last.endedAt || last.endTime || last.startTime)) : 'Never',
+        nextSession: next ? formatNext(new Date(next.startTime)) : undefined,
+        status,
+        studentId: m.menteeClerkId,
+      };
+    });
+
+    return res.json({ mentees, total: mentees.length });
   } catch (error) {
-    console.error('Error adding mentee:', error);
-    res.status(500).json({ message: 'An error occurred on the server.' });
+    console.error('Error fetching mentor mentees:', error);
+    return res.status(500).json({ message: 'An error occurred on the server.' });
   }
 });
 
-// GET /api/mentor-mentees/:id
+// POST /api/mentor-mentees - Add a new mentee (creates mentorship + plan)
+router.post('/mentor-mentees', async (req, res) => {
+  try {
+    const { mentorId, name, email, goal, status } = req.body as {
+      mentorId?: string;
+      name?: string;
+      email?: string;
+      goal?: string;
+      status?: 'Active' | 'Paused' | 'New';
+    };
+    if (!mentorId || !name || !email || !goal) {
+      return res.status(400).json({ message: 'mentorId, name, email, and goal are required.' });
+    }
+
+    const mentorship = await Mentorship.findOneAndUpdate(
+      { mentorId, menteeEmail: email.toLowerCase() },
+      {
+        $setOnInsert: {
+          mentorId,
+          menteeEmail: email.toLowerCase(),
+        },
+        $set: {
+          menteeName: name,
+          goal,
+          status: status === 'Paused' ? 'paused' : status === 'Active' ? 'active' : 'invited',
+        },
+      },
+      { upsert: true, new: true }
+    );
+
+    await getOrCreatePlanByMentorship(mentorId, mentorship._id);
+
+    return res.status(201).json({
+      id: String(mentorship._id),
+      name: mentorship.menteeName,
+      email: mentorship.menteeEmail,
+      avatarUrl: `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(mentorship.menteeName || 'Mentee')}`,
+      goal: mentorship.goal,
+      progress: 0,
+      lastSession: 'Never',
+      status: 'New',
+      studentId: mentorship.menteeClerkId,
+    });
+  } catch (error) {
+    console.error('Error adding mentee:', error);
+    return res.status(500).json({ message: 'An error occurred on the server.' });
+  }
+});
+
+// GET /api/mentor-mentees/:id (id = mentorshipId)
 router.get('/mentor-mentees/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const { mentorId } = req.query as { mentorId?: string };
-    if (!mentorId) {
-      return res.status(400).json({ message: 'mentorId is required' });
-    }
+    if (!mentorId) return res.status(400).json({ message: 'mentorId is required' });
+    if (!mongoose.Types.ObjectId.isValid(id)) return res.status(400).json({ message: 'Invalid mentee id' });
+
+    const mentorship = await Mentorship.findOne({ _id: id, mentorId }).lean();
+    if (!mentorship) return res.status(404).json({ message: 'Mentee not found' });
+
+    const plan = await getOrCreatePlanByMentorship(mentorId, new mongoose.Types.ObjectId(id));
     const sessions = await MentorSession.find({
       mentorId,
-      $or: [{ studentId: id }, { studentName: { $regex: id, $options: 'i' } }],
-    }).sort({ startTime: -1 });
-    if (sessions.length === 0) {
-      return res.status(404).json({ message: 'Mentee not found' });
-    }
-    const firstSession = sessions[0];
-    const upcomingSessions = sessions.filter(
-  (s) =>
-    s.startTime > new Date() &&
-    s.status as string !== 'draft'
-);
+      $or: [
+        ...(mentorship.menteeClerkId ? [{ studentId: mentorship.menteeClerkId }] : []),
+        ...(mentorship.menteeEmail ? [{ studentEmail: mentorship.menteeEmail }] : []),
+      ],
+    }).sort({ startTime: -1 }).lean();
 
-    const nextSession = upcomingSessions.length > 0
-      ? upcomingSessions.sort((a, b) => a.startTime.getTime() - b.startTime.getTime())[0]
-      : null;
-    const completedCount = sessions.filter((s) => s.status === 'completed').length;
-    const totalCount = sessions.length;
-    const progress = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
-    
-    /** FIX START: Aligned detail view status logic **/
+    const now = new Date();
+    const upcomingSessions = sessions.filter((s: any) => new Date(s.startTime) > now && String(s.status) !== 'draft');
+    const nextSession = upcomingSessions.length ? upcomingSessions.sort((a: any, b: any) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime())[0] : null;
+    const completedCount = sessions.filter((s: any) => s.status === 'completed').length;
+
     let status: 'Active' | 'Paused' | 'New' = 'New';
-    if (nextSession && (nextSession.status as string) !== 'draft') {
-      status = 'Active';
-    } else if (completedCount > 0) {
-      status = 'Paused';
-    } else {
-      status = 'New';
-    }
-    /** FIX END **/
+    if (nextSession) status = 'Active';
+    else if (completedCount > 0) status = 'Paused';
 
-    const milestones = [
-      {
-        id: 'm1',
-        title: 'Complete Data Structures & Algorithms',
-        description: 'Master core DSA concepts and solve 200+ problems',
-        completed: progress >= 25,
-        dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toLocaleDateString('en-GB', {
-          day: 'numeric',
-          month: 'short',
-          year: 'numeric',
-        }),
-      },
-      {
-        id: 'm2',
-        title: 'System Design Fundamentals',
-        description: 'Learn distributed systems, scalability, and design patterns',
-        completed: progress >= 50,
-        dueDate: new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toLocaleDateString('en-GB', {
-          day: 'numeric',
-          month: 'short',
-          year: 'numeric',
-        }),
-      },
-      {
-        id: 'm3',
-        title: 'Mock Interviews',
-        description: 'Complete 10 mock interviews with feedback',
-        completed: progress >= 75,
-        dueDate: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toLocaleDateString('en-GB', {
-          day: 'numeric',
-          month: 'short',
-          year: 'numeric',
-        }),
-      },
-    ];
-    const sessionList = sessions.slice(0, 10).map((s) => ({
+    const milestones = (plan.milestones || []).map((m: any) => ({
+      id: String(m._id),
+      title: m.title,
+      description: m.description,
+      completed: !!m.completed,
+      dueDate: m.dueDate,
+    }));
+
+    const sessionList = sessions.slice(0, 10).map((s: any) => ({
       id: String(s._id),
-      date: s.startTime.toLocaleDateString('en-GB', {
+      date: new Date(s.startTime).toLocaleDateString('en-GB', {
         day: 'numeric',
         month: 'short',
         year: 'numeric',
-        hour: s.startTime > new Date() ? 'numeric' : undefined,
-        minute: s.startTime > new Date() ? '2-digit' : undefined,
+        ...(new Date(s.startTime) > now ? { hour: 'numeric', minute: '2-digit' } : {}),
       }),
       title: s.title,
-      status: s.status === 'completed' ? 'completed' : s.startTime > new Date() ? 'upcoming' : 'cancelled',
+      status: s.status === 'completed' ? 'completed' : new Date(s.startTime) > now ? 'upcoming' : 'cancelled',
     }));
-    const mentee = {
-      id: firstSession.studentId || `mentee-${firstSession.studentName}`,
-      name: firstSession.studentName,
-      email: firstSession.studentEmail,
-      avatarUrl: `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(firstSession.studentName)}`,
-      goal: firstSession.title || 'Career development',
-      progress,
-      lastSession: sessions
-        .filter((s) => s.status === 'completed')
-        .sort((a, b) => b.startTime.getTime() - a.startTime.getTime())[0]
-        ?.startTime.toLocaleDateString('en-GB', {
-          day: 'numeric',
-          month: 'short',
-          year: 'numeric',
-        }) || 'Never',
-      nextSession: nextSession
-        ? nextSession.startTime.toLocaleDateString('en-GB', {
-            day: 'numeric',
-            month: 'short',
-            hour: 'numeric',
-            minute: '2-digit',
-          })
-        : undefined,
+
+    const lastCompleted = sessions
+      .filter((s: any) => s.status === 'completed')
+      .sort((a: any, b: any) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime())[0];
+
+    return res.json({
+      id: String(mentorship._id),
+      name: mentorship.menteeName,
+      email: mentorship.menteeEmail,
+      avatarUrl: `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(mentorship.menteeName || 'Mentee')}`,
+      goal: mentorship.goal || 'Career development',
+      progress: plan.progress || 0,
+      lastSession: lastCompleted ? new Date(lastCompleted.startTime).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : 'Never',
+      nextSession: nextSession ? new Date(nextSession.startTime).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) : undefined,
       status,
-      studentId: firstSession.studentId,
+      studentId: mentorship.menteeClerkId,
       milestones,
       sessions: sessionList,
-      notes: sessions.find((s) => s.notes)?.notes || undefined,
-    };
-    res.json(mentee);
+      notes: plan.notes || undefined,
+    });
   } catch (error) {
     console.error('Error fetching mentee details:', error);
-    res.status(500).json({ message: 'An error occurred on the server.' });
+    return res.status(500).json({ message: 'An error occurred on the server.' });
+  }
+});
+
+// PATCH /api/mentor-mentees/:id/plan (update notes/progress)
+router.patch('/mentor-mentees/:id/plan', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { mentorId } = req.query as { mentorId?: string };
+    const { notes, progress } = req.body as { notes?: string; progress?: number };
+    if (!mentorId) return res.status(400).json({ message: 'mentorId is required' });
+    if (!mongoose.Types.ObjectId.isValid(id)) return res.status(400).json({ message: 'Invalid mentee id' });
+
+    const mentorship = await Mentorship.findOne({ _id: id, mentorId });
+    if (!mentorship) return res.status(404).json({ message: 'Mentee not found' });
+
+    const plan = await MenteePlan.findOneAndUpdate(
+      { mentorId, mentorshipId: id },
+      {
+        $set: {
+          ...(typeof notes === 'string' ? { notes } : {}),
+          ...(typeof progress === 'number' ? { progress } : {}),
+        },
+      },
+      { new: true, upsert: true }
+    );
+
+    return res.json({ success: true, data: { notes: plan.notes, progress: plan.progress } });
+  } catch (error) {
+    console.error('Error updating plan:', error);
+    return res.status(500).json({ message: 'An error occurred on the server.' });
+  }
+});
+
+// POST /api/mentor-mentees/:id/milestones (add milestone)
+router.post('/mentor-mentees/:id/milestones', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { mentorId } = req.query as { mentorId?: string };
+    const { title, description, dueDate } = req.body as { title?: string; description?: string; dueDate?: string };
+    if (!mentorId) return res.status(400).json({ message: 'mentorId is required' });
+    if (!mongoose.Types.ObjectId.isValid(id)) return res.status(400).json({ message: 'Invalid mentee id' });
+    if (!title || !description) return res.status(400).json({ message: 'title and description are required' });
+
+    const mentorship = await Mentorship.findOne({ _id: id, mentorId });
+    if (!mentorship) return res.status(404).json({ message: 'Mentee not found' });
+
+    const plan = await getOrCreatePlanByMentorship(mentorId, new mongoose.Types.ObjectId(id));
+    plan.milestones.push({ title, description, completed: false, ...(dueDate ? { dueDate: new Date(dueDate) } : {}) } as any);
+    await plan.save();
+
+    const last = plan.milestones[plan.milestones.length - 1] as any;
+    return res.status(201).json({ success: true, data: { id: String(last._id), title: last.title, description: last.description, completed: !!last.completed, dueDate: last.dueDate } });
+  } catch (error) {
+    console.error('Error adding milestone:', error);
+    return res.status(500).json({ message: 'An error occurred on the server.' });
+  }
+});
+
+// PATCH /api/mentor-mentees/:id/milestones/:milestoneId
+router.patch('/mentor-mentees/:id/milestones/:milestoneId', async (req, res) => {
+  try {
+    const { id, milestoneId } = req.params;
+    const { mentorId } = req.query as { mentorId?: string };
+    const { title, description, dueDate, completed } = req.body as { title?: string; description?: string; dueDate?: string; completed?: boolean };
+    if (!mentorId) return res.status(400).json({ message: 'mentorId is required' });
+    if (!mongoose.Types.ObjectId.isValid(id) || !mongoose.Types.ObjectId.isValid(milestoneId)) {
+      return res.status(400).json({ message: 'Invalid id' });
+    }
+
+    const plan = await getOrCreatePlanByMentorship(mentorId, new mongoose.Types.ObjectId(id));
+    const milestone = (plan.milestones as any).id(milestoneId);
+    if (!milestone) return res.status(404).json({ message: 'Milestone not found' });
+
+    if (typeof title === 'string') milestone.title = title;
+    if (typeof description === 'string') milestone.description = description;
+    if (typeof completed === 'boolean') milestone.completed = completed;
+    if (typeof dueDate === 'string') milestone.dueDate = new Date(dueDate);
+
+    await plan.save();
+    return res.json({ success: true, data: { id: String(milestone._id), title: milestone.title, description: milestone.description, completed: !!milestone.completed, dueDate: milestone.dueDate } });
+  } catch (error) {
+    console.error('Error updating milestone:', error);
+    return res.status(500).json({ message: 'An error occurred on the server.' });
+  }
+});
+
+// DELETE /api/mentor-mentees/:id/milestones/:milestoneId
+router.delete('/mentor-mentees/:id/milestones/:milestoneId', async (req, res) => {
+  try {
+    const { id, milestoneId } = req.params;
+    const { mentorId } = req.query as { mentorId?: string };
+    if (!mentorId) return res.status(400).json({ message: 'mentorId is required' });
+    if (!mongoose.Types.ObjectId.isValid(id) || !mongoose.Types.ObjectId.isValid(milestoneId)) {
+      return res.status(400).json({ message: 'Invalid id' });
+    }
+
+    const plan = await getOrCreatePlanByMentorship(mentorId, new mongoose.Types.ObjectId(id));
+    const milestone = (plan.milestones as any).id(milestoneId);
+    if (!milestone) return res.status(404).json({ message: 'Milestone not found' });
+    milestone.deleteOne();
+    await plan.save();
+    return res.status(204).send();
+  } catch (error) {
+    console.error('Error deleting milestone:', error);
+    return res.status(500).json({ message: 'An error occurred on the server.' });
+  }
+});
+
+// POST /api/mentor-mentees/:id/message
+router.post('/mentor-mentees/:id/message', async (req, res) => {
+  try {
+    const { id } = req.params; // mentorshipId
+    const { mentorId, message } = req.body as { mentorId?: string; message?: string };
+    if (!mentorId) return res.status(400).json({ message: 'mentorId is required' });
+    if (!message || !message.trim()) return res.status(400).json({ message: 'message is required' });
+    if (!mongoose.Types.ObjectId.isValid(id)) return res.status(400).json({ message: 'Invalid mentee id' });
+
+    const mentorship = await Mentorship.findOne({ _id: id, mentorId });
+    if (!mentorship) return res.status(404).json({ message: 'Mentee not found' });
+
+    const doc = await MenteeMessage.create({ mentorId, mentorshipId: id, sender: 'mentor', message: message.trim() });
+    return res.json({ success: true, data: { id: String(doc._id), createdAt: doc.createdAt } });
+  } catch (error) {
+    console.error('Error sending mentee message:', error);
+    return res.status(500).json({ message: 'An error occurred on the server.' });
   }
 });
 

@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { getProjects, getProjectById, joinProject, getUserProjects } from '../controllers/project.controller';
-import { customAuthMiddleware } from '../middleware/auth.middleware';
+import { requireAuth } from '../middleware/auth.middleware';
 
 const router = Router();
 
@@ -11,7 +11,8 @@ router.get('/', getProjects);
 router.get('/:id', getProjectById);
 
 // Protected routes require authentication
-router.use(customAuthMiddleware);
+router.use(requireAuth);
+
 
 // POST /api/projects/:id/join - Join a project
 router.post('/:id/join', joinProject);

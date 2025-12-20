@@ -1,6 +1,6 @@
 import express from 'express';
 import { getRecommendations } from '../controllers/recommendation.controller';
-import { protectRoute } from '../middleware/protectRoute'; // Assuming you have this middleware
+import { requireAuth } from '../middleware/protectRoute'; // Assuming you have this middleware
 
 /**
  * @name RecommendationRouter
@@ -29,11 +29,8 @@ const router = express.Router();
  * ]
  * }
  */
-router.post(
-  '/', // The base path will be '/api/recommendations' as defined in your main server file
-  protectRoute, // Middleware: Ensures the user is logged in before proceeding
-  getRecommendations // Controller: Contains the core AI matching logic
-);
+router.post("/", requireAuth, getRecommendations);
+
 
 export default router;
 

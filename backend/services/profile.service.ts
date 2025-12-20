@@ -17,9 +17,7 @@ export const getUserProfile = async (userId: string) => {
 
 export const createUserProfile = async (userId: string, profileData: Partial<IProfile>) => {
     const user = await User.findOne({ clerkId: userId });
-    if (!user) {
-        throw new Error('User not found');
-    }
+    if (!user) return null; // <-- NOT throw
 
     // Check if profile already exists - if it does, update it instead
     const existingProfile = await Profile.findOne({ userId: user._id });

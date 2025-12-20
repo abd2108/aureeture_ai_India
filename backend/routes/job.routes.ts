@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { getJobs, getJobById, applyToJob, getUserApplications } from '../controllers/job.controller';
-import { customAuthMiddleware } from '../middleware/auth.middleware';
+import { requireAuth } from '../middleware/auth.middleware';
 import { validateRequest } from '../middleware/validate.middleware';
 import { jobApplicationSchema } from '../utils/validationSchemas';
 
@@ -13,7 +13,8 @@ router.get('/', getJobs);
 router.get('/:id', getJobById);
 
 // Protected routes require authentication
-router.use(customAuthMiddleware);
+router.use(requireAuth);
+
 
 // POST /api/jobs/:id/apply - Apply to a job
 router.post('/:id/apply', validateRequest(jobApplicationSchema), applyToJob);

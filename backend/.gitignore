@@ -1,0 +1,88 @@
+# ============================================
+# Backend - Node.js/Express/TypeScript
+# ============================================
+
+# Dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Environment Variables
+.env
+.env.local
+.env.development
+.env.production
+.env.test
+*.env
+!.env.example
+
+# Build Output
+dist/
+build/
+*.tsbuildinfo
+tsconfig.tsbuildinfo
+
+# Compiled JavaScript
+*.js
+*.js.map
+!server.js
+!**/*.config.js
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+data/
+*.dump
+
+# Testing
+coverage/
+.nyc_output/
+*.lcov
+.jest/
+
+# IDE
+.vscode/
+.idea/
+*.iml
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Temporary
+*.tmp
+*.temp
+*.bak
+*.backup
+.cache/
+.temp/
+tmp/
+
+# Package Manager
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+.pnpm-store/
+
+# Misc
+*.pid
+*.seed
+*.pid.lock
+.npm
+.eslintcache

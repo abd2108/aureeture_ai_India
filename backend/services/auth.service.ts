@@ -1,6 +1,7 @@
 import { clerkClient } from '@clerk/clerk-sdk-node';
 import User from '../models/user.model';
 import Profile from '../models/profile.model';
+import Mentorship from '../models/mentorship.model';
 
 interface ProfileStatus {
     userId: string;
@@ -31,6 +32,15 @@ export const verifyUserAndGetProfileStatus = async (token: string): Promise<Prof
             avatar: user.imageUrl,
         });
     }
+
+    // --- Mentorship invite claiming (registered mentor/mentee visibility) ---
+    // If this user was previously invited as a mentee by email, attach their Clerk userId
+    // so both sides can see the relationship after the mentee registers.
+    const email = user.emailAddresses[0].emailAddress.toLowerCase();
+    await Mentorship.updateMany(
+        { menteeEmail: email, $or: [{ menteeClerkId: { $exists: false } }, { menteeClerkId: null }, { menteeClerkId: '' }] },
+        { $set: { menteeClerkId: user.id, status: 'active' } }
+    ).catch(() => undefined);
 
     // Check if a profile exists
     const profile = await Profile.findOne({ userId: localUser._id });

@@ -5,6 +5,7 @@
 # ============================================
 # Environment Variables & Secrets
 # ============================================
+*.zip
 .env
 .env.local
 .env.development
@@ -258,3 +259,4 @@ site/
 !*.sample
 
 
+frontend.zip

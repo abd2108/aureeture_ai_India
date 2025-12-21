@@ -2,6 +2,7 @@
 
 import React, { useMemo, useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { useUser } from "@clerk/nextjs";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Search,
@@ -50,7 +51,9 @@ type Expert = {
   verified: boolean;
   linkedinUrl: string;
 };
-// we need to fetch it from the backend 
+// Backend sources:
+// - GET /api/mentors (browse mentors)
+// - GET /api/student/my-mentors?studentId=... (relationship-based "my mentors")
 
 const allExperts: Expert[] = [
   {
@@ -174,6 +177,29 @@ const allExperts: Expert[] = [
   },
 ];
 
+const normalizeMentor = (m: any): Expert => {
+  // backend already returns most of these fields, but keep a defensive fallback
+  const name: string = m.name || "Mentor";
+  const initials = (m.avatarInitial || name.split(" ").map((p: string) => p[0]).join("").slice(0, 2)).toUpperCase();
+  return {
+    id: m.id || m._id || name,
+    name,
+    role: m.role || "Professional",
+    company: m.company || "Company",
+    companyLogo: m.companyLogo || "",
+    avatarInitial: initials,
+    rating: Number(m.rating ?? 4.8),
+    reviews: Number(m.reviews ?? 0),
+    expertise: Array.isArray(m.expertise) ? m.expertise : [],
+    price: Number(m.price ?? 0),
+    availability: m.availability || "—",
+    domain: m.domain || "—",
+    experience: m.experience || "—",
+    verified: Boolean(m.verified ?? true),
+    linkedinUrl: m.linkedinUrl || "",
+  };
+};
+
 const StatCard = ({ label, value }: { label: string; value: string }) => (
   <div className="p-4 border border-zinc-200 dark:border-zinc-800 rounded-xl bg-white dark:bg-zinc-950">
     <p className="text-xs text-zinc-500 font-medium uppercase tracking-wider">{label}</p>
@@ -185,21 +211,68 @@ const StatCard = ({ label, value }: { label: string; value: string }) => (
 
 export default function StudentMentorsPage() {
   const router = useRouter();
+  const { user, isLoaded, isSignedIn } = useUser();
+  const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || "";
+
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [selectedDomain, setSelectedDomain] = useState("All");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedExpert, setSelectedExpert] = useState<Expert | null>(null);
-  
-  // FIX: Hardcoded experts to ensure they render no matter what
-  const [experts, setExperts] = useState<Expert[]>(allExperts);
-  const [loading, setLoading] = useState(false);
 
-  const stats = {
-    totalMentors: 124,
-    avgHourlyRate: 3200,
-    activeSessions: 3,
-    satisfaction: "4.9",
-  };
+  // Loaded from backend (fallback to mock if backend isn't configured)
+  const [experts, setExperts] = useState<Expert[]>([]);
+  const [stats, setStats] = useState({
+    totalMentors: 0,
+    avgHourlyRate: 0,
+    activeSessions: 0,
+    satisfaction: "0.0",
+  });
+  const [loading, setLoading] = useState(true);
+  const [myMentorIds, setMyMentorIds] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    const load = async () => {
+      // If API base isn't configured, keep UI working with mock data
+      if (!apiBase) {
+        setExperts(allExperts);
+        setStats({ totalMentors: allExperts.length, avgHourlyRate: 3200, activeSessions: 0, satisfaction: "4.9" });
+        setLoading(false);
+        return;
+      }
+
+      setLoading(true);
+      try {
+        // 1) Public mentors list (browse)
+        const res = await fetch(`${apiBase}/api/mentors`, { credentials: "include" });
+        const data = await res.json();
+        if (res.ok && data?.mentors) {
+          setExperts(data.mentors as Expert[]);
+          if (data.stats) setStats(data.stats);
+        } else {
+          setExperts(allExperts);
+        }
+
+        // 2) Logged-in student's mapped mentors ("My mentors")
+        if (isLoaded && isSignedIn && user?.id) {
+          const r2 = await fetch(
+            `${apiBase}/api/student/my-mentors?studentId=${encodeURIComponent(user.id)}`,
+            { credentials: "include" }
+          );
+          const d2 = await r2.json();
+          if (r2.ok && Array.isArray(d2?.mentors)) {
+            setMyMentorIds(new Set(d2.mentors.map((m: any) => String(m.id))));
+          }
+        }
+      } catch (e) {
+        // fallback
+        setExperts(allExperts);
+        setStats({ totalMentors: allExperts.length, avgHourlyRate: 3200, activeSessions: 0, satisfaction: "4.9" });
+      } finally {
+        setLoading(false);
+      }
+    };
+    load();
+  }, [apiBase, isLoaded, isSignedIn, user?.id]);
 
   const filteredExperts = useMemo(() => {
     return experts.filter((expert) => {
@@ -264,7 +337,12 @@ export default function StudentMentorsPage() {
         </div>
       </div>
 
-      {filteredExperts.length === 0 ? (
+      {loading ? (
+        <div className="flex items-center justify-center py-16 text-sm text-zinc-500">
+          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+          Loading mentors...
+        </div>
+      ) : filteredExperts.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 text-center">
           <p className="text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">No mentors found</p>
           <p className="text-xs text-zinc-500">Try adjusting your search or filters</p>
@@ -286,9 +364,12 @@ export default function StudentMentorsPage() {
                     <AvatarFallback className="bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 font-medium rounded-lg">{expert.avatarInitial}</AvatarFallback>
                   </Avatar>
                   <div>
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-1.5 flex-wrap">
                       <h3 className="font-semibold text-zinc-900 dark:text-zinc-100">{expert.name}</h3>
                       {expert.verified && <ShieldCheck size={14} className="text-zinc-400" />}
+                      {myMentorIds.has(String(expert.id)) && (
+                        <Badge className="ml-1" variant="secondary">My mentor</Badge>
+                      )}
                     </div>
                     <p className="text-sm text-zinc-500 flex items-center gap-1">{expert.role}, <span className="font-medium text-zinc-700 dark:text-zinc-300">{expert.company}</span></p>
                     <a href={expert.linkedinUrl} target="_blank" rel="noopener noreferrer" className="mt-1 inline-flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-100 underline-offset-2 hover:underline">

@@ -333,7 +333,12 @@ const MentorOverviewPage: React.FC = () => {
         const filtered = all.filter((s) =>
           isSameDay(new Date(s.startTime))
         );
-        setTodaySessions(filtered.slice(0, 5));
+        const deduped = Array.from(
+  new Map(filtered.map((s) => [s._id, s])).values()
+);
+
+setTodaySessions(deduped.slice(0, 5));
+        //setTodaySessions(filtered.slice(0, 5));
       } catch (err: any) {
         console.error("Error loading today sessions:", err);
         setTodayError(err.message || "Unable to load today's sessions");

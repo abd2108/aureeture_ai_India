@@ -1,13 +1,14 @@
 import { Router } from 'express';
 import { getPeople, sendConnectionRequest, getConnections, respondToConnection } from '../controllers/people.controller';
-import { customAuthMiddleware } from '../middleware/auth.middleware';
+import { requireAuth } from '../middleware/auth.middleware';
 import { validateRequest } from '../middleware/validate.middleware';
 import { connectionRequestSchema, connectionResponseSchema } from '../utils/validationSchemas';
 
 const router = Router();
 
 // All people routes require authentication
-router.use(customAuthMiddleware);
+router.use(requireAuth);
+
 
 // GET /api/people - Get people suggestions
 router.get('/', getPeople);

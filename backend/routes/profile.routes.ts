@@ -1,13 +1,15 @@
 import { Router } from 'express';
 import { getProfile, updateProfile, createProfile } from '../controllers/profile.controller';
-import { customAuthMiddleware } from '../middleware/auth.middleware';
+import { requireAuth } from '../middleware/auth.middleware';
 import { validateRequest } from '../middleware/validate.middleware';
 import { createProfileSchema, updateProfileSchema } from '../utils/validationSchemas';
+import * as ProfileService from '../services/profile.service';
 
 const router = Router();
 
 // All profile routes require authentication
-router.use(customAuthMiddleware);
+router.use(requireAuth);
+
 
 // GET /api/profile
 router.get('/', getProfile);

@@ -10,6 +10,37 @@ import { sendEmail, generateSessionConfirmationEmail } from '../services/email.s
 
 const router = Router();
 
+
+const upsertMentorshipFromSession = async (mentorId: string, studentId?: string, studentEmail?: string, studentName?: string, title?: string) => {
+  if (!mentorId) return;
+  const menteeClerkId = studentId || undefined;
+  const menteeEmail = (studentEmail || "").toLowerCase() || undefined;
+
+  if (!menteeClerkId && !menteeEmail) return;
+
+  const query: any = { mentorId };
+  if (menteeClerkId) query.menteeClerkId = menteeClerkId;
+  else query.menteeEmail = menteeEmail;
+
+  await Mentorship.findOneAndUpdate(
+    query,
+    {
+      $setOnInsert: {
+        mentorId,
+        menteeClerkId,
+        menteeEmail,
+        status: "active",
+      },
+      $set: {
+        ...(studentName ? { menteeName: studentName } : {}),
+        ...(title ? { goal: title } : {}),
+        updatedAt: new Date(),
+      },
+    },
+    { upsert: true, new: true }
+  );
+};
+
 /**
  * Ensure we have Mentorship documents for any sessions that already exist.
  * This keeps backward compatibility with the previous "sessions-derived mentees" behavior.

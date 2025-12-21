@@ -33,13 +33,12 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
-// --- Types ---
 type Expert = {
-  id: string | number;
+  id: string;
   name: string;
   role: string;
   company: string;
-  companyLogo: string;
+  companyLogo?: string;
   avatarInitial: string;
   rating: number;
   reviews: number;
@@ -52,24 +51,12 @@ type Expert = {
   linkedinUrl: string;
 };
 
-type MentorsStats = {
-  totalMentors: number;
-  avgHourlyRate: number;
-  activeSessions: number;
-  satisfaction: string; // "4.9"
-};
-
-// Backend response expected:
-// GET /api/mentors => { mentors: [], stats: {...} }
-// GET /api/student/my-mentors => { mentors: [], total: number }
-
-const allExperts: Expert[] = [
+const mockExperts: Expert[] = [
   {
-    id: 1,
+    id: "1",
     name: "Aditi Sharma",
     role: "Director of Engineering",
     company: "Google",
-    companyLogo: "",
     avatarInitial: "AS",
     rating: 4.9,
     reviews: 128,
@@ -81,120 +68,29 @@ const allExperts: Expert[] = [
     verified: true,
     linkedinUrl: "https://www.linkedin.com/in/aditi-sharma",
   },
-  {
-    id: 2,
-    name: "Rohan Mehta",
-    role: "Principal PM",
-    company: "Microsoft",
-    companyLogo: "",
-    avatarInitial: "RM",
-    rating: 4.8,
-    reviews: 94,
-    expertise: ["Product Strategy", "B2B SaaS"],
-    price: 4200,
-    availability: "Tue, 12 Dec",
-    domain: "Product",
-    experience: "9 Yrs",
-    verified: true,
-    linkedinUrl: "https://www.linkedin.com/in/rohan-mehta",
-  },
-  {
-    id: 3,
-    name: "Sameer Khan",
-    role: "Lead Data Scientist",
-    company: "Amazon",
-    companyLogo: "",
-    avatarInitial: "SK",
-    rating: 5.0,
-    reviews: 210,
-    expertise: ["AI/ML", "Python"],
-    price: 3500,
-    availability: "Available Now",
-    domain: "Data Science",
-    experience: "8 Yrs",
-    verified: true,
-    linkedinUrl: "https://www.linkedin.com/in/sameer-khan",
-  },
-  {
-    id: 4,
-    name: "Priya Singh",
-    role: "Senior UX Designer",
-    company: "Cred",
-    companyLogo: "",
-    avatarInitial: "PS",
-    rating: 4.9,
-    reviews: 180,
-    expertise: ["Design Systems", "Figma"],
-    price: 2800,
-    availability: "Wed, 13 Dec",
-    domain: "Design",
-    experience: "7 Yrs",
-    verified: false,
-    linkedinUrl: "https://www.linkedin.com/in/priya-singh",
-  },
-  {
-    id: 5,
-    name: "Vikram Kumar",
-    role: "Staff Engineer",
-    company: "Zerodha",
-    companyLogo: "",
-    avatarInitial: "VK",
-    rating: 4.9,
-    reviews: 150,
-    expertise: ["Backend", "Golang"],
-    price: 3000,
-    availability: "Thu, 14 Dec",
-    domain: "Software",
-    experience: "10 Yrs",
-    verified: true,
-    linkedinUrl: "https://www.linkedin.com/in/vikram-kumar",
-  },
-  {
-    id: 6,
-    name: "Ananya Gupta",
-    role: "Marketing Head",
-    company: "Zomato",
-    companyLogo: "",
-    avatarInitial: "AG",
-    rating: 4.7,
-    reviews: 85,
-    expertise: ["Growth", "Brand"],
-    price: 2500,
-    availability: "Fri, 15 Dec",
-    domain: "Marketing",
-    experience: "6 Yrs",
-    verified: false,
-    linkedinUrl: "https://www.linkedin.com/in/ananya-gupta",
-  },
 ];
 
-const safeInitials = (name: string) =>
-  (name || "M")
-    .split(" ")
-    .filter(Boolean)
-    .map((p) => p[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase();
-
 const normalizeMentor = (m: any): Expert => {
-  const name: string = m?.name || m?.fullName || "Mentor";
+  const name = String(m?.name || "Mentor");
+  const initials =
+    String(m?.avatarInitial || name.split(" ").map((p: string) => p[0]).join("").slice(0, 2)).toUpperCase();
+
   return {
     id: String(m?.id || m?._id || name),
     name,
-    role: m?.role || m?.title || "Professional",
-    company: m?.company || m?.organization || "Company",
-    companyLogo: m?.companyLogo || "",
-    avatarInitial: m?.avatarInitial || safeInitials(name),
+    role: String(m?.role || "Professional"),
+    company: String(m?.company || "Company"),
+    companyLogo: String(m?.companyLogo || ""),
+    avatarInitial: initials,
     rating: Number(m?.rating ?? 4.8),
     reviews: Number(m?.reviews ?? 0),
-    expertise: Array.isArray(m?.expertise) ? m.expertise : Array.isArray(m?.skills) ? m.skills : [],
-    price: Number(m?.price ?? m?.sessionPrice ?? 0),
-    availability: m?.availability || "—",
-    domain: m?.domain || m?.category || "—",
-    experience: m?.experience || m?.yearsExperience || "—",
-    verified: Boolean(m?.verified ?? m?.isVerified ?? true),
-    linkedinUrl: m?.linkedinUrl || m?.linkedin || "",
+    expertise: Array.isArray(m?.expertise) ? m.expertise : [],
+    price: Number(m?.price ?? 0),
+    availability: String(m?.availability || "—"),
+    domain: String(m?.domain || "—"),
+    experience: String(m?.experience || "—"),
+    verified: Boolean(m?.verified ?? true),
+    linkedinUrl: String(m?.linkedinUrl || ""),
   };
 };
 
@@ -202,7 +98,9 @@ const StatCard = ({ label, value }: { label: string; value: string }) => (
   <div className="p-4 border border-zinc-200 dark:border-zinc-800 rounded-xl bg-white dark:bg-zinc-950">
     <p className="text-xs text-zinc-500 font-medium uppercase tracking-wider">{label}</p>
     <div className="mt-2 flex items-baseline gap-2">
-      <span className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">{value}</span>
+      <span className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
+        {value}
+      </span>
     </div>
   </div>
 );
@@ -210,6 +108,7 @@ const StatCard = ({ label, value }: { label: string; value: string }) => (
 export default function StudentMentorsPage() {
   const router = useRouter();
   const { user, isLoaded, isSignedIn } = useUser();
+
   const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || "";
 
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
@@ -218,22 +117,23 @@ export default function StudentMentorsPage() {
   const [selectedExpert, setSelectedExpert] = useState<Expert | null>(null);
 
   const [experts, setExperts] = useState<Expert[]>([]);
-  const [stats, setStats] = useState<MentorsStats>({
+  const [stats, setStats] = useState({
     totalMentors: 0,
     avgHourlyRate: 0,
     activeSessions: 0,
     satisfaction: "0.0",
   });
   const [loading, setLoading] = useState(true);
+
   const [myMentorIds, setMyMentorIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     const load = async () => {
-      // If API base isn't configured, keep UI working with mock data
+      // fallback if api base missing
       if (!apiBase) {
-        setExperts(allExperts);
+        setExperts(mockExperts);
         setStats({
-          totalMentors: allExperts.length,
+          totalMentors: mockExperts.length,
           avgHourlyRate: 3200,
           activeSessions: 0,
           satisfaction: "4.9",
@@ -244,11 +144,9 @@ export default function StudentMentorsPage() {
 
       setLoading(true);
       try {
-        // 1) Marketplace mentors list (browse)
+        // 1) Browse mentors
         const res = await fetch(`${apiBase}/api/mentors`, { credentials: "include" });
-        const data = await res.json().catch(() => ({}));
-
-        console.log("MENTORS API:", data);
+        const data = await res.json();
 
         if (res.ok && Array.isArray(data?.mentors)) {
           const normalized = data.mentors.map(normalizeMentor);
@@ -264,61 +162,40 @@ export default function StudentMentorsPage() {
           } else {
             setStats({
               totalMentors: normalized.length,
-              avgHourlyRate: 0,
+              avgHourlyRate: normalized.length
+                ? Math.round(normalized.reduce((s: number, m: Expert) => s + (m.price || 0), 0) / normalized.length)
+                : 0,
               activeSessions: 0,
-              satisfaction: "0.0",
-            });
-          }
-
-          // If backend mentors list is empty, fallback to mock (so UI never empty)
-          if (normalized.length === 0) {
-            setExperts(allExperts);
-            setStats({
-              totalMentors: allExperts.length,
-              avgHourlyRate: 3200,
-              activeSessions: 0,
-              satisfaction: "4.9",
+              satisfaction: "4.8",
             });
           }
         } else {
           // fallback
-          setExperts(allExperts);
-          setStats({
-            totalMentors: allExperts.length,
-            avgHourlyRate: 3200,
-            activeSessions: 0,
-            satisfaction: "4.9",
-          });
+          setExperts(mockExperts);
         }
 
-        // 2) Logged-in student's "my mentors"
+        // 2) My mentors mapping (to show badge)
         if (isLoaded && isSignedIn && user?.id) {
           const r2 = await fetch(
             `${apiBase}/api/student/my-mentors?studentId=${encodeURIComponent(user.id)}`,
             { credentials: "include" }
           );
-          const d2 = await r2.json().catch(() => ({}));
-
-          console.log("MY MENTORS API:", d2);
+          const d2 = await r2.json();
 
           if (r2.ok && Array.isArray(d2?.mentors)) {
-            setMyMentorIds(new Set(d2.mentors.map((m: any) => String(m.id || m._id))));
+            setMyMentorIds(new Set(d2.mentors.map((m: any) => String(m.id))));
           } else {
             setMyMentorIds(new Set());
           }
-        } else {
-          setMyMentorIds(new Set());
         }
       } catch (e) {
-        console.error("Mentors load error:", e);
-        setExperts(allExperts);
+        setExperts(mockExperts);
         setStats({
-          totalMentors: allExperts.length,
+          totalMentors: mockExperts.length,
           avgHourlyRate: 3200,
           activeSessions: 0,
           satisfaction: "4.9",
         });
-        setMyMentorIds(new Set());
       } finally {
         setLoading(false);
       }
@@ -328,27 +205,32 @@ export default function StudentMentorsPage() {
   }, [apiBase, isLoaded, isSignedIn, user?.id]);
 
   const filteredExperts = useMemo(() => {
-    const q = searchQuery.toLowerCase();
     return experts.filter((expert) => {
       const matchesSearch =
-        (expert.name || "").toLowerCase().includes(q) ||
-        (expert.company || "").toLowerCase().includes(q);
-
+        expert.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        expert.company.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesDomain = selectedDomain === "All" || expert.domain === selectedDomain;
       return matchesSearch && matchesDomain;
     });
   }, [searchQuery, selectedDomain, experts]);
 
+  const domainOptions = useMemo(() => {
+    const set = new Set(experts.map((e) => e.domain).filter(Boolean));
+    return ["All", ...Array.from(set)];
+  }, [experts]);
+
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-xl font-semibold tracking-tight">Mentorship</h1>
-        <p className="text-sm text-zinc-500">Connect with industry experts for guidance and career advice.</p>
+        <p className="text-sm text-zinc-500">
+          Connect with industry experts for guidance and career advice.
+        </p>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <StatCard label="Total Mentors" value={String(stats.totalMentors)} />
-        <StatCard label="Avg. Hourly Rate" value={`₹${Number(stats.avgHourlyRate || 0).toLocaleString("en-IN")}`} />
+        <StatCard label="Avg. Hourly Rate" value={`₹${Number(stats.avgHourlyRate).toLocaleString("en-IN")}`} />
         <StatCard label="Active Sessions" value={String(stats.activeSessions)} />
         <StatCard label="Satisfaction" value={`${stats.satisfaction}/5.0`} />
       </div>
@@ -367,16 +249,18 @@ export default function StudentMentorsPage() {
         <div className="flex items-center gap-2 w-full sm:w-auto">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="outline" className="h-9 border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-300 gap-2">
+              <Button
+                variant="outline"
+                className="h-9 border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-300 gap-2"
+              >
                 <Filter size={14} />
                 {selectedDomain}
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => setSelectedDomain("All")}>All Domains</DropdownMenuItem>
-              {["Software", "Product", "Data Science", "Design", "Marketing"].map((d) => (
+              {domainOptions.map((d) => (
                 <DropdownMenuItem key={d} onClick={() => setSelectedDomain(d)}>
-                  {d}
+                  {d === "All" ? "All Domains" : d}
                 </DropdownMenuItem>
               ))}
             </DropdownMenuContent>
@@ -414,7 +298,9 @@ export default function StudentMentorsPage() {
         </div>
       ) : filteredExperts.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 text-center">
-          <p className="text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">No mentors found</p>
+          <p className="text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+            No mentors found
+          </p>
           <p className="text-xs text-zinc-500">Try adjusting your search or filters</p>
         </div>
       ) : (
@@ -425,11 +311,15 @@ export default function StudentMentorsPage() {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}
             transition={{ duration: 0.2 }}
-            className={viewMode === "grid" ? "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5" : "flex flex-col gap-3"}
+            className={
+              viewMode === "grid"
+                ? "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5"
+                : "flex flex-col gap-3"
+            }
           >
             {filteredExperts.map((expert) => (
               <div
-                key={String(expert.id)}
+                key={expert.id}
                 className={`group relative bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl hover:border-zinc-300 dark:hover:border-zinc-700 transition-all duration-200 ${
                   viewMode === "list" ? "flex items-center p-4 gap-6" : "p-5 flex flex-col"
                 }`}
@@ -440,9 +330,12 @@ export default function StudentMentorsPage() {
                       {expert.avatarInitial}
                     </AvatarFallback>
                   </Avatar>
+
                   <div>
                     <div className="flex items-center gap-1.5 flex-wrap">
-                      <h3 className="font-semibold text-zinc-900 dark:text-zinc-100">{expert.name}</h3>
+                      <h3 className="font-semibold text-zinc-900 dark:text-zinc-100">
+                        {expert.name}
+                      </h3>
                       {expert.verified && <ShieldCheck size={14} className="text-zinc-400" />}
                       {myMentorIds.has(String(expert.id)) && (
                         <Badge className="ml-1" variant="secondary">
@@ -452,7 +345,9 @@ export default function StudentMentorsPage() {
                     </div>
                     <p className="text-sm text-zinc-500">
                       {expert.role},{" "}
-                      <span className="font-medium text-zinc-700 dark:text-zinc-300">{expert.company}</span>
+                      <span className="font-medium text-zinc-700 dark:text-zinc-300">
+                        {expert.company}
+                      </span>
                     </p>
                     {!!expert.linkedinUrl && (
                       <a
@@ -471,17 +366,23 @@ export default function StudentMentorsPage() {
                 <div className="space-y-4 mb-4">
                   <div className="flex items-center gap-4 text-sm text-zinc-600 dark:text-zinc-400">
                     <div className="flex items-center gap-1">
-                      <Star size={14} className="fill-zinc-900 dark:fill-zinc-100 text-zinc-900 dark:text-zinc-100" />
-                      <span className="font-medium text-zinc-900 dark:text-zinc-100">{expert.rating}</span>
+                      <Star
+                        size={14}
+                        className="fill-zinc-900 dark:fill-zinc-100 text-zinc-900 dark:text-zinc-100"
+                      />
+                      <span className="font-medium text-zinc-900 dark:text-zinc-100">
+                        {expert.rating}
+                      </span>
                       <span className="text-zinc-400">({expert.reviews})</span>
                     </div>
                     <div className="w-px h-3 bg-zinc-200 dark:bg-zinc-700" />
                     <span>{expert.experience} Exp.</span>
                   </div>
+
                   <div className="flex flex-wrap gap-2">
                     {expert.expertise.map((skill) => (
                       <Badge
-                        key={`${expert.id}-${skill}`}
+                        key={skill}
                         variant="outline"
                         className="border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 font-normal"
                       >
@@ -494,7 +395,7 @@ export default function StudentMentorsPage() {
                 <div className="flex items-center justify-between pt-4 border-t border-zinc-100 dark:border-zinc-800 mt-auto">
                   <div className="font-mono">
                     <span className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
-                      ₹{Number(expert.price || 0).toLocaleString("en-IN")}
+                      ₹{Number(expert.price).toLocaleString("en-IN")}
                     </span>
                     <span className="text-xs text-zinc-500"> / session</span>
                   </div>
@@ -515,7 +416,9 @@ export default function StudentMentorsPage() {
       <Dialog open={!!selectedExpert} onOpenChange={() => setSelectedExpert(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{selectedExpert ? `Book a session with ${selectedExpert.name}` : ""}</DialogTitle>
+            <DialogTitle>
+              {selectedExpert ? `Book a session with ${selectedExpert.name}` : ""}
+            </DialogTitle>
             <DialogDescription>This is a preview booking flow.</DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -524,7 +427,11 @@ export default function StudentMentorsPage() {
             </Button>
             <Button
               onClick={() =>
-                router.push(`/dashboard/student/booking/slot-selection?mentorId=${encodeURIComponent(String(selectedExpert?.id || ""))}`)
+                router.push(
+                  `/dashboard/student/booking/slot-selection?mentorId=${encodeURIComponent(
+                    selectedExpert?.id || ""
+                  )}`
+                )
               }
             >
               Book Session

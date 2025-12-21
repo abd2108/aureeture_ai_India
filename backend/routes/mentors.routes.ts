@@ -101,178 +101,168 @@ router.get('/mentors', async (req, res) => {
   try {
     await ensureDemoMentors();
 
-    // Get all unique mentorIds (Clerk IDs) from sessions
-    const mentorClerkIds = await MentorSession.distinct('mentorId');
-    
-    // Find mentors - either from sessions or from profiles with mentor data
+    // 1) mentors from sessions
+    const mentorClerkIdsFromSessions = await MentorSession.distinct('mentorId');
+
+    // 2) fallback: mentors from profiles
     let mentorClerkIdList: string[] = [];
-    
-    if (mentorClerkIds.length > 0) {
-      mentorClerkIdList = mentorClerkIds;
+
+    if (mentorClerkIdsFromSessions.length > 0) {
+      mentorClerkIdList = mentorClerkIdsFromSessions as string[];
     } else {
-      // Find profiles with mentor-like data (completed onboarding with role/company)
       const mentorProfiles = await Profile.find({
         onboardingComplete: true,
         currentRole: { $exists: true, $ne: null },
         currentCompany: { $exists: true, $ne: null },
-      }).populate('userId', 'clerkId').limit(20);
-      
+      })
+        .populate('userId', 'clerkId')
+        .limit(50)
+        .lean();
+
       mentorClerkIdList = mentorProfiles
-        .map(p => (p.userId as any)?.clerkId)
-        .filter((id): id is string => !!id);
+        .map((p: any) => p?.userId?.clerkId)
+        .filter((id: any): id is string => !!id);
     }
 
-    // Get users for these Clerk IDs
-    const users = await User.find({ clerkId: { $in: mentorClerkIdList } });
-    const mentorUserIds = users.map(u => u._id.toString());
+    // ✅ de-duplicate
+    mentorClerkIdList = Array.from(new Set(mentorClerkIdList));
 
-    // Get all mentor profiles
+    // Get users for these Clerk IDs
+    const users = await User.find({ clerkId: { $in: mentorClerkIdList } }).lean();
+
+    // ✅ map clerkId -> user
+    const userByClerkId = new Map<string, any>();
+    users.forEach(u => userByClerkId.set(u.clerkId, u));
+
+    // IMPORTANT FIX: use ObjectIds for Profile.userId query
+    const mentorUserIds = users.map(u => u._id);
+
     const profiles = await Profile.find({
       userId: { $in: mentorUserIds },
       onboardingComplete: true,
-    }).populate('userId', 'name email avatar clerkId');
+    })
+      .populate('userId', 'name email avatar clerkId')
+      .lean();
 
-    // Get all sessions for these mentors to calculate stats
+    // All sessions once
     const allSessions = await MentorSession.find({
       mentorId: { $in: mentorClerkIdList },
-    });
+    }).lean();
 
-    // Format mentors data
-    const mentors = await Promise.all(profiles.map(async (profile: any) => {
-      const user = profile.userId;
-      const mentorClerkId = user?.clerkId || mentorClerkIdList.find(id => id);
-      const mentorSessions = allSessions.filter(s => s.mentorId === mentorClerkId);
-      
-      // Calculate rating and reviews from completed sessions
-      const completedSessions = mentorSessions.filter(s => s.status === 'completed');
-      const rating = completedSessions.length > 0 ? 4.9 : 4.5; // Mock rating, can be from reviews table
-      const reviews = completedSessions.length;
+    const mentorsRaw = await Promise.all(
+      profiles.map(async (profile: any) => {
+        const user = profile.userId as any;
+        if (!user?.clerkId) return null;
 
-      // Calculate experience from workHistory
-      const workHistory = profile.workHistory || [];
-      let experienceYears = 0;
-      if (workHistory.length > 0) {
-        const earliestWork = workHistory.reduce((earliest: any, work: any) => {
-          if (!earliest || !work.from) return earliest || work;
-          return new Date(work.from) < new Date(earliest.from) ? work : earliest;
-        }, null);
-        if (earliestWork && earliestWork.from) {
-          const yearsDiff = (new Date().getTime() - new Date(earliestWork.from).getTime()) / (1000 * 60 * 60 * 24 * 365);
-          experienceYears = Math.round(yearsDiff);
+        const mentorClerkId = user.clerkId;
+        const mentorSessions = allSessions.filter((s: any) => s.mentorId === mentorClerkId);
+
+        const completedSessions = mentorSessions.filter((s: any) => s.status === 'completed');
+        const rating = completedSessions.length > 0 ? 4.9 : 4.5;
+        const reviews = completedSessions.length;
+
+        // Experience fallback
+        const role = profile.currentRole || '';
+        const skills = profile.skills || [];
+        let experienceYears =
+          role.includes('Director') ? 12 :
+          role.includes('Principal') ? 9 :
+          role.includes('Lead') ? 8 :
+          role.includes('Senior') ? 7 :
+          role.includes('Staff') ? 10 : 6;
+
+        // Availability
+        const upcomingSessions = mentorSessions.filter((s: any) =>
+          s.status === 'scheduled' && new Date(s.startTime) > new Date()
+        );
+        let availabilityText = 'Available Now';
+        if (upcomingSessions.length > 0) {
+          const nextSession = upcomingSessions.sort((a: any, b: any) =>
+            new Date(a.startTime).getTime() - new Date(b.startTime).getTime()
+          )[0];
+          const nextDate = new Date(nextSession.startTime);
+          const daysDiff = Math.ceil((nextDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+          if (daysDiff === 1) availabilityText = 'Tomorrow';
+          else availabilityText = nextDate.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
         }
-      }
-      if (experienceYears === 0) {
-        // Fallback to default based on role
-        experienceYears = profile.currentRole?.includes('Director') ? 12 :
-                         profile.currentRole?.includes('Principal') ? 9 :
-                         profile.currentRole?.includes('Lead') ? 8 :
-                         profile.currentRole?.includes('Senior') ? 7 :
-                         profile.currentRole?.includes('Staff') ? 10 : 6;
-      }
 
-      // Get availability from MentorAvailability or calculate from upcoming sessions
-      const availability = await MentorAvailability.findOne({ mentorId: mentorClerkId });
-      const upcomingSessions = mentorSessions.filter(s => 
-        s.status === 'scheduled' && new Date(s.startTime) > new Date()
-      );
-      
-      let availabilityText = 'Available Now';
-      if (upcomingSessions.length > 0) {
-        const nextSession = upcomingSessions.sort((a, b) => 
-          new Date(a.startTime).getTime() - new Date(b.startTime).getTime()
-        )[0];
-        const nextDate = new Date(nextSession.startTime);
-        const daysDiff = Math.ceil((nextDate.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
-        if (daysDiff === 0) {
-          availabilityText = 'Available Now';
-        } else if (daysDiff === 1) {
-          availabilityText = 'Tomorrow';
-        } else {
-          availabilityText = nextDate.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
-        }
-      }
+        // Domain
+        let domain = 'Software';
+        const roleLc = role.toLowerCase();
+        const has = (k: string) => skills.some((s: string) => (s || '').toLowerCase().includes(k));
+        if (roleLc.includes('design') || has('figma') || has('design')) domain = 'Design';
+        else if (roleLc.includes('data') || roleLc.includes('scientist') || has('ai') || has('ml') || has('python')) domain = 'Data Science';
+        else if (roleLc.includes('product') || roleLc.includes('pm') || has('saas') || has('product')) domain = 'Product';
+        else if (roleLc.includes('marketing') || has('growth') || has('brand')) domain = 'Marketing';
 
-      // Determine domain from skills or role
-      const skills = profile.skills || [];
-      const role = profile.currentRole || '';
-      let domain = 'Software';
-      if (role.toLowerCase().includes('design') || skills.some((s: string) => s.toLowerCase().includes('design') || s.toLowerCase().includes('figma'))) {
-        domain = 'Design';
-      } else if (role.toLowerCase().includes('data') || role.toLowerCase().includes('scientist') || skills.some((s: string) => s.toLowerCase().includes('ai') || s.toLowerCase().includes('ml') || s.toLowerCase().includes('python'))) {
-        domain = 'Data Science';
-      } else if (role.toLowerCase().includes('product') || role.toLowerCase().includes('pm') || skills.some((s: string) => s.toLowerCase().includes('product') || s.toLowerCase().includes('saas'))) {
-        domain = 'Product';
-      } else if (role.toLowerCase().includes('marketing') || skills.some((s: string) => s.toLowerCase().includes('growth') || s.toLowerCase().includes('brand'))) {
-        domain = 'Marketing';
-      }
+        // Price
+        const paidSessions = mentorSessions.filter((s: any) => (s.amount || 0) > 0);
+        const avgPrice = paidSessions.length > 0
+          ? Math.round(paidSessions.reduce((sum: number, s: any) => sum + (s.amount || 0), 0) / paidSessions.length)
+          : role.includes('Director') ? 5000 :
+            role.includes('Principal') ? 4200 :
+            role.includes('Lead') ? 3500 :
+            role.includes('Senior') ? 2800 :
+            role.includes('Staff') ? 3000 : 2500;
 
-      // Get price from recent sessions or default
-      const recentPaidSessions = mentorSessions.filter(s => s.amount && s.amount > 0);
-      const avgPrice = recentPaidSessions.length > 0
-        ? Math.round(recentPaidSessions.reduce((sum, s) => sum + (s.amount || 0), 0) / recentPaidSessions.length)
-        : profile.currentRole?.includes('Director') ? 5000 :
-          profile.currentRole?.includes('Principal') ? 4200 :
-          profile.currentRole?.includes('Lead') ? 3500 :
-          profile.currentRole?.includes('Senior') ? 2800 :
-          profile.currentRole?.includes('Staff') ? 3000 : 2500;
+        const name = user?.name || 'Mentor';
+        const initials = name.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2);
 
-      // Get avatar initial
-      const name = user?.name || profile.currentRole || 'M';
-      const initials = name.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2);
+        return {
+          id: mentorClerkId, // ✅ IMPORTANT: this is what frontend uses for booking & myMentorIds
+          name,
+          role: profile.currentRole || 'Professional',
+          company: profile.currentCompany || 'Company',
+          companyLogo: '',
+          avatarInitial: initials,
+          rating,
+          reviews: reviews || Math.floor(Math.random() * 200) + 50,
+          expertise: (skills && skills.length ? skills.slice(0, 3) : ['Expertise']),
+          price: avgPrice,
+          availability: availabilityText,
+          domain,
+          experience: `${experienceYears} Yrs`,
+          verified: true,
+          linkedinUrl: profile.personalInfo?.linkedIn || `https://www.linkedin.com/in/${name.toLowerCase().replace(/\s+/g, '-')}`,
+        };
+      })
+    );
 
-      return {
-        id: mentorClerkId || user?._id.toString() || Date.now(),
-        name: user?.name || profile.currentRole || 'Mentor',
-        role: profile.currentRole || 'Professional',
-        company: profile.currentCompany || 'Company',
-        companyLogo: '',
-        avatarInitial: initials,
-        rating: rating,
-        reviews: reviews || Math.floor(Math.random() * 200) + 50,
-        expertise: skills.slice(0, 3) || ['Expertise'],
-        price: avgPrice,
-        availability: availabilityText,
-        domain: domain,
-        experience: `${experienceYears} Yrs`,
-        verified: true, // All mentors are verified
-        linkedinUrl: profile.personalInfo?.linkedIn || `https://www.linkedin.com/in/${name.toLowerCase().replace(/\s+/g, '-')}`,
-      };
-    }));
+    const mentors = mentorsRaw.filter(Boolean) as any[];
 
-    // Calculate stats
     const totalMentors = mentors.length;
-    const avgHourlyRate = mentors.length > 0
-      ? Math.round(mentors.reduce((sum, m) => sum + m.price, 0) / mentors.length)
+    const avgHourlyRate = totalMentors > 0
+      ? Math.round(mentors.reduce((sum, m) => sum + (m.price || 0), 0) / totalMentors)
       : 3200;
-    
-    // Count active sessions (scheduled sessions in next 7 days)
+
     const sevenDaysFromNow = new Date();
     sevenDaysFromNow.setDate(sevenDaysFromNow.getDate() + 7);
-    const activeSessions = allSessions.filter(s =>
+
+    const activeSessions = allSessions.filter((s: any) =>
       s.status === 'scheduled' &&
       new Date(s.startTime) >= new Date() &&
       new Date(s.startTime) <= sevenDaysFromNow
     ).length;
 
-    // Calculate average satisfaction (from ratings)
-    const avgSatisfaction = mentors.length > 0
-      ? (mentors.reduce((sum, m) => sum + m.rating, 0) / mentors.length).toFixed(1)
+    const avgSatisfaction = totalMentors > 0
+      ? (mentors.reduce((sum, m) => sum + (m.rating || 0), 0) / totalMentors).toFixed(1)
       : '4.9';
 
-    res.json({
-      mentors: mentors,
+    return res.json({
+      mentors,
       stats: {
         totalMentors: totalMentors || 124,
-        avgHourlyRate: avgHourlyRate,
+        avgHourlyRate,
         activeSessions: activeSessions || 18,
         satisfaction: avgSatisfaction,
       },
     });
   } catch (error) {
     console.error('Error fetching mentors:', error);
-    res.status(500).json({ message: 'An error occurred on the server.' });
+    return res.status(500).json({ message: 'An error occurred on the server.' });
   }
 });
+
 
 export default router;
 

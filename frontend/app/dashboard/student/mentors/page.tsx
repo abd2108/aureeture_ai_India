@@ -33,7 +33,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
-// --- Types & Data ---
+// --- Types ---
 type Expert = {
   id: string | number;
   name: string;
@@ -51,9 +51,17 @@ type Expert = {
   verified: boolean;
   linkedinUrl: string;
 };
-// Backend sources:
-// - GET /api/mentors (browse mentors)
-// - GET /api/student/my-mentors?studentId=... (relationship-based "my mentors")
+
+type MentorsStats = {
+  totalMentors: number;
+  avgHourlyRate: number;
+  activeSessions: number;
+  satisfaction: string; // "4.9"
+};
+
+// Backend response expected:
+// GET /api/mentors => { mentors: [], stats: {...} }
+// GET /api/student/my-mentors => { mentors: [], total: number }
 
 const allExperts: Expert[] = [
   {
@@ -158,45 +166,35 @@ const allExperts: Expert[] = [
     verified: false,
     linkedinUrl: "https://www.linkedin.com/in/ananya-gupta",
   },
-  {
-    id: 7,
-    name: "Abdullah",
-    role: "Marketing Head",
-    company: "Zomato",
-    companyLogo: "",
-    avatarInitial: "AG",
-    rating: 4.7,
-    reviews: 85,
-    expertise: ["Growth", "Brand"],
-    price: 2500,
-    availability: "Fri, 15 Dec",
-    domain: "Marketing",
-    experience: "6 Yrs",
-    verified: true,
-    linkedinUrl: "https://www.linkedin.com/in/ananya-gupta",
-  },
 ];
 
+const safeInitials = (name: string) =>
+  (name || "M")
+    .split(" ")
+    .filter(Boolean)
+    .map((p) => p[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+
 const normalizeMentor = (m: any): Expert => {
-  // backend already returns most of these fields, but keep a defensive fallback
-  const name: string = m.name || "Mentor";
-  const initials = (m.avatarInitial || name.split(" ").map((p: string) => p[0]).join("").slice(0, 2)).toUpperCase();
+  const name: string = m?.name || m?.fullName || "Mentor";
   return {
-    id: m.id || m._id || name,
+    id: String(m?.id || m?._id || name),
     name,
-    role: m.role || "Professional",
-    company: m.company || "Company",
-    companyLogo: m.companyLogo || "",
-    avatarInitial: initials,
-    rating: Number(m.rating ?? 4.8),
-    reviews: Number(m.reviews ?? 0),
-    expertise: Array.isArray(m.expertise) ? m.expertise : [],
-    price: Number(m.price ?? 0),
-    availability: m.availability || "—",
-    domain: m.domain || "—",
-    experience: m.experience || "—",
-    verified: Boolean(m.verified ?? true),
-    linkedinUrl: m.linkedinUrl || "",
+    role: m?.role || m?.title || "Professional",
+    company: m?.company || m?.organization || "Company",
+    companyLogo: m?.companyLogo || "",
+    avatarInitial: m?.avatarInitial || safeInitials(name),
+    rating: Number(m?.rating ?? 4.8),
+    reviews: Number(m?.reviews ?? 0),
+    expertise: Array.isArray(m?.expertise) ? m.expertise : Array.isArray(m?.skills) ? m.skills : [],
+    price: Number(m?.price ?? m?.sessionPrice ?? 0),
+    availability: m?.availability || "—",
+    domain: m?.domain || m?.category || "—",
+    experience: m?.experience || m?.yearsExperience || "—",
+    verified: Boolean(m?.verified ?? m?.isVerified ?? true),
+    linkedinUrl: m?.linkedinUrl || m?.linkedin || "",
   };
 };
 
@@ -219,9 +217,8 @@ export default function StudentMentorsPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedExpert, setSelectedExpert] = useState<Expert | null>(null);
 
-  // Loaded from backend (fallback to mock if backend isn't configured)
   const [experts, setExperts] = useState<Expert[]>([]);
-  const [stats, setStats] = useState({
+  const [stats, setStats] = useState<MentorsStats>({
     totalMentors: 0,
     avgHourlyRate: 0,
     activeSessions: 0,
@@ -235,52 +232,109 @@ export default function StudentMentorsPage() {
       // If API base isn't configured, keep UI working with mock data
       if (!apiBase) {
         setExperts(allExperts);
-        setStats({ totalMentors: allExperts.length, avgHourlyRate: 3200, activeSessions: 0, satisfaction: "4.9" });
+        setStats({
+          totalMentors: allExperts.length,
+          avgHourlyRate: 3200,
+          activeSessions: 0,
+          satisfaction: "4.9",
+        });
         setLoading(false);
         return;
       }
 
       setLoading(true);
       try {
-        // 1) Public mentors list (browse)
+        // 1) Marketplace mentors list (browse)
         const res = await fetch(`${apiBase}/api/mentors`, { credentials: "include" });
-        const data = await res.json();
-        if (res.ok && data?.mentors) {
-          setExperts(data.mentors as Expert[]);
-          if (data.stats) setStats(data.stats);
+        const data = await res.json().catch(() => ({}));
+
+        console.log("MENTORS API:", data);
+
+        if (res.ok && Array.isArray(data?.mentors)) {
+          const normalized = data.mentors.map(normalizeMentor);
+          setExperts(normalized);
+
+          if (data?.stats) {
+            setStats({
+              totalMentors: Number(data.stats.totalMentors ?? normalized.length),
+              avgHourlyRate: Number(data.stats.avgHourlyRate ?? 0),
+              activeSessions: Number(data.stats.activeSessions ?? 0),
+              satisfaction: String(data.stats.satisfaction ?? "0.0"),
+            });
+          } else {
+            setStats({
+              totalMentors: normalized.length,
+              avgHourlyRate: 0,
+              activeSessions: 0,
+              satisfaction: "0.0",
+            });
+          }
+
+          // If backend mentors list is empty, fallback to mock (so UI never empty)
+          if (normalized.length === 0) {
+            setExperts(allExperts);
+            setStats({
+              totalMentors: allExperts.length,
+              avgHourlyRate: 3200,
+              activeSessions: 0,
+              satisfaction: "4.9",
+            });
+          }
         } else {
+          // fallback
           setExperts(allExperts);
+          setStats({
+            totalMentors: allExperts.length,
+            avgHourlyRate: 3200,
+            activeSessions: 0,
+            satisfaction: "4.9",
+          });
         }
 
-        // 2) Logged-in student's mapped mentors ("My mentors")
+        // 2) Logged-in student's "my mentors"
         if (isLoaded && isSignedIn && user?.id) {
           const r2 = await fetch(
             `${apiBase}/api/student/my-mentors?studentId=${encodeURIComponent(user.id)}`,
             { credentials: "include" }
           );
-          const d2 = await r2.json();
+          const d2 = await r2.json().catch(() => ({}));
+
+          console.log("MY MENTORS API:", d2);
+
           if (r2.ok && Array.isArray(d2?.mentors)) {
-            setMyMentorIds(new Set(d2.mentors.map((m: any) => String(m.id))));
+            setMyMentorIds(new Set(d2.mentors.map((m: any) => String(m.id || m._id))));
+          } else {
+            setMyMentorIds(new Set());
           }
+        } else {
+          setMyMentorIds(new Set());
         }
       } catch (e) {
-        // fallback
+        console.error("Mentors load error:", e);
         setExperts(allExperts);
-        setStats({ totalMentors: allExperts.length, avgHourlyRate: 3200, activeSessions: 0, satisfaction: "4.9" });
+        setStats({
+          totalMentors: allExperts.length,
+          avgHourlyRate: 3200,
+          activeSessions: 0,
+          satisfaction: "4.9",
+        });
+        setMyMentorIds(new Set());
       } finally {
         setLoading(false);
       }
     };
+
     load();
   }, [apiBase, isLoaded, isSignedIn, user?.id]);
 
   const filteredExperts = useMemo(() => {
+    const q = searchQuery.toLowerCase();
     return experts.filter((expert) => {
       const matchesSearch =
-        expert.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        expert.company.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchesDomain =
-        selectedDomain === "All" || expert.domain === selectedDomain;
+        (expert.name || "").toLowerCase().includes(q) ||
+        (expert.company || "").toLowerCase().includes(q);
+
+      const matchesDomain = selectedDomain === "All" || expert.domain === selectedDomain;
       return matchesSearch && matchesDomain;
     });
   }, [searchQuery, selectedDomain, experts]);
@@ -293,9 +347,9 @@ export default function StudentMentorsPage() {
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <StatCard label="Total Mentors" value={stats.totalMentors.toString()} />
-        <StatCard label="Avg. Hourly Rate" value={`₹${stats.avgHourlyRate.toLocaleString("en-IN")}`} />
-        <StatCard label="Active Sessions" value={stats.activeSessions.toString()} />
+        <StatCard label="Total Mentors" value={String(stats.totalMentors)} />
+        <StatCard label="Avg. Hourly Rate" value={`₹${Number(stats.avgHourlyRate || 0).toLocaleString("en-IN")}`} />
+        <StatCard label="Active Sessions" value={String(stats.activeSessions)} />
         <StatCard label="Satisfaction" value={`${stats.satisfaction}/5.0`} />
       </div>
 
@@ -321,16 +375,32 @@ export default function StudentMentorsPage() {
             <DropdownMenuContent align="end">
               <DropdownMenuItem onClick={() => setSelectedDomain("All")}>All Domains</DropdownMenuItem>
               {["Software", "Product", "Data Science", "Design", "Marketing"].map((d) => (
-                <DropdownMenuItem key={d} onClick={() => setSelectedDomain(d)}>{d}</DropdownMenuItem>
+                <DropdownMenuItem key={d} onClick={() => setSelectedDomain(d)}>
+                  {d}
+                </DropdownMenuItem>
               ))}
             </DropdownMenuContent>
           </DropdownMenu>
 
           <div className="h-9 border border-zinc-200 dark:border-zinc-800 rounded-md flex p-0.5 bg-white dark:bg-zinc-900">
-            <button onClick={() => setViewMode("grid")} className={`px-2.5 rounded-sm flex items-center justify-center transition-all ${viewMode === "grid" ? "bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 shadow-sm" : "text-zinc-400"}`}>
+            <button
+              onClick={() => setViewMode("grid")}
+              className={`px-2.5 rounded-sm flex items-center justify-center transition-all ${
+                viewMode === "grid"
+                  ? "bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 shadow-sm"
+                  : "text-zinc-400"
+              }`}
+            >
               <LayoutGrid size={16} />
             </button>
-            <button onClick={() => setViewMode("list")} className={`px-2.5 rounded-sm flex items-center justify-center transition-all ${viewMode === "list" ? "bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 shadow-sm" : "text-zinc-400"}`}>
+            <button
+              onClick={() => setViewMode("list")}
+              className={`px-2.5 rounded-sm flex items-center justify-center transition-all ${
+                viewMode === "list"
+                  ? "bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 shadow-sm"
+                  : "text-zinc-400"
+              }`}
+            >
               <List size={16} />
             </button>
           </div>
@@ -358,24 +428,43 @@ export default function StudentMentorsPage() {
             className={viewMode === "grid" ? "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5" : "flex flex-col gap-3"}
           >
             {filteredExperts.map((expert) => (
-              <div key={expert.id} className={`group relative bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl hover:border-zinc-300 dark:hover:border-zinc-700 transition-all duration-200 ${viewMode === "list" ? "flex items-center p-4 gap-6" : "p-5 flex flex-col"}`}>
+              <div
+                key={String(expert.id)}
+                className={`group relative bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl hover:border-zinc-300 dark:hover:border-zinc-700 transition-all duration-200 ${
+                  viewMode === "list" ? "flex items-center p-4 gap-6" : "p-5 flex flex-col"
+                }`}
+              >
                 <div className={`flex items-start gap-4 ${viewMode === "list" ? "flex-1" : "mb-4"}`}>
                   <Avatar className="h-12 w-12 border border-zinc-100 dark:border-zinc-800 rounded-lg">
-                    <AvatarFallback className="bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 font-medium rounded-lg">{expert.avatarInitial}</AvatarFallback>
+                    <AvatarFallback className="bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 font-medium rounded-lg">
+                      {expert.avatarInitial}
+                    </AvatarFallback>
                   </Avatar>
                   <div>
                     <div className="flex items-center gap-1.5 flex-wrap">
                       <h3 className="font-semibold text-zinc-900 dark:text-zinc-100">{expert.name}</h3>
                       {expert.verified && <ShieldCheck size={14} className="text-zinc-400" />}
                       {myMentorIds.has(String(expert.id)) && (
-                        <Badge className="ml-1" variant="secondary">My mentor</Badge>
+                        <Badge className="ml-1" variant="secondary">
+                          My mentor
+                        </Badge>
                       )}
                     </div>
-                    <p className="text-sm text-zinc-500 flex items-center gap-1">{expert.role}, <span className="font-medium text-zinc-700 dark:text-zinc-300">{expert.company}</span></p>
-                    <a href={expert.linkedinUrl} target="_blank" rel="noopener noreferrer" className="mt-1 inline-flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-100 underline-offset-2 hover:underline">
-                      <Linkedin className="h-3.5 w-3.5" />
-                      <span>View LinkedIn</span>
-                    </a>
+                    <p className="text-sm text-zinc-500">
+                      {expert.role},{" "}
+                      <span className="font-medium text-zinc-700 dark:text-zinc-300">{expert.company}</span>
+                    </p>
+                    {!!expert.linkedinUrl && (
+                      <a
+                        href={expert.linkedinUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mt-1 inline-flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-100 underline-offset-2 hover:underline"
+                      >
+                        <Linkedin className="h-3.5 w-3.5" />
+                        <span>View LinkedIn</span>
+                      </a>
+                    )}
                   </div>
                 </div>
 
@@ -391,17 +480,31 @@ export default function StudentMentorsPage() {
                   </div>
                   <div className="flex flex-wrap gap-2">
                     {expert.expertise.map((skill) => (
-                      <Badge key={skill} variant="outline" className="border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 font-normal">{skill}</Badge>
+                      <Badge
+                        key={`${expert.id}-${skill}`}
+                        variant="outline"
+                        className="border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 font-normal"
+                      >
+                        {skill}
+                      </Badge>
                     ))}
                   </div>
                 </div>
 
                 <div className="flex items-center justify-between pt-4 border-t border-zinc-100 dark:border-zinc-800 mt-auto">
                   <div className="font-mono">
-                    <span className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">₹{expert.price.toLocaleString("en-IN")}</span>
+                    <span className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
+                      ₹{Number(expert.price || 0).toLocaleString("en-IN")}
+                    </span>
                     <span className="text-xs text-zinc-500"> / session</span>
                   </div>
-                  <Button size="sm" className="bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 hover:bg-zinc-800 dark:hover:bg-zinc-200 shadow-sm" onClick={() => setSelectedExpert(expert)}>Book Now</Button>
+                  <Button
+                    size="sm"
+                    className="bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 hover:bg-zinc-800 dark:hover:bg-zinc-200 shadow-sm"
+                    onClick={() => setSelectedExpert(expert)}
+                  >
+                    Book Now
+                  </Button>
                 </div>
               </div>
             ))}
@@ -416,8 +519,16 @@ export default function StudentMentorsPage() {
             <DialogDescription>This is a preview booking flow.</DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setSelectedExpert(null)}>Cancel</Button>
-            <Button onClick={() => router.push(`/dashboard/student/booking/slot-selection?mentorId=${selectedExpert?.id}`)}>Book Session</Button>
+            <Button variant="outline" onClick={() => setSelectedExpert(null)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() =>
+                router.push(`/dashboard/student/booking/slot-selection?mentorId=${encodeURIComponent(String(selectedExpert?.id || ""))}`)
+              }
+            >
+              Book Session
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

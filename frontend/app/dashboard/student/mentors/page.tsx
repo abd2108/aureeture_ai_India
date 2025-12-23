@@ -37,6 +37,7 @@ type Expert = {
   id: string;
   name: string;
   role: string;
+  title?: string;
   company: string;
   companyLogo?: string;
   avatarInitial: string;
@@ -51,25 +52,6 @@ type Expert = {
   linkedinUrl: string;
 };
 
-const mockExperts: Expert[] = [
-  {
-    id: "1",
-    name: "Aditi Sharma",
-    role: "Director of Engineering",
-    company: "Google",
-    avatarInitial: "AS",
-    rating: 4.9,
-    reviews: 128,
-    expertise: ["System Design", "Scalability"],
-    price: 5000,
-    availability: "Tomorrow",
-    domain: "Software",
-    experience: "12 Yrs",
-    verified: true,
-    linkedinUrl: "https://www.linkedin.com/in/aditi-sharma",
-  },
-];
-
 const normalizeMentor = (m: any): Expert => {
   const name = String(m?.name || "Mentor");
   const initials =
@@ -79,6 +61,7 @@ const normalizeMentor = (m: any): Expert => {
     id: String(m?.id || m?._id || name),
     name,
     role: String(m?.role || "Professional"),
+    title: m?.title ? String(m.title) : undefined,
     company: String(m?.company || "Company"),
     companyLogo: String(m?.companyLogo || ""),
     avatarInitial: initials,
@@ -129,25 +112,13 @@ export default function StudentMentorsPage() {
 
   useEffect(() => {
     const load = async () => {
-      // fallback if api base missing
-      if (!apiBase) {
-        setExperts(mockExperts);
-        setStats({
-          totalMentors: mockExperts.length,
-          avgHourlyRate: 3200,
-          activeSessions: 0,
-          satisfaction: "4.9",
-        });
-        setLoading(false);
-        return;
-      }
-
       setLoading(true);
       try {
+        const mentorsUrl = apiBase ? `${apiBase}/api/mentors` : `/api/mentors`;
         // 1) Browse mentors
-        const res = await fetch(`${apiBase}/api/mentors`, { credentials: "include" });
+        const res = await fetch(mentorsUrl, { credentials: "include" });
         const data = await res.json();
-
+        console.log("MENTORS DATA:", data);
         if (res.ok && Array.isArray(data?.mentors)) {
           const normalized = data.mentors.map(normalizeMentor);
           setExperts(normalized);
@@ -170,16 +141,15 @@ export default function StudentMentorsPage() {
             });
           }
         } else {
-          // fallback
-          setExperts(mockExperts);
+          setExperts([]);
         }
 
         // 2) My mentors mapping (to show badge)
         if (isLoaded && isSignedIn && user?.id) {
-          const r2 = await fetch(
-            `${apiBase}/api/student/my-mentors?studentId=${encodeURIComponent(user.id)}`,
-            { credentials: "include" }
-          );
+          const myMentorsUrl = apiBase
+            ? `${apiBase}/api/student/my-mentors?studentId=${encodeURIComponent(user.id)}`
+            : `/api/student/my-mentors?studentId=${encodeURIComponent(user.id)}`;
+          const r2 = await fetch(myMentorsUrl, { credentials: "include" });
           const d2 = await r2.json();
 
           if (r2.ok && Array.isArray(d2?.mentors)) {
@@ -189,13 +159,9 @@ export default function StudentMentorsPage() {
           }
         }
       } catch (e) {
-        setExperts(mockExperts);
-        setStats({
-          totalMentors: mockExperts.length,
-          avgHourlyRate: 3200,
-          activeSessions: 0,
-          satisfaction: "4.9",
-        });
+        // eslint-disable-next-line no-console
+        console.error("Failed to load mentors", e);
+        setExperts([]);
       } finally {
         setLoading(false);
       }
@@ -344,7 +310,7 @@ export default function StudentMentorsPage() {
                       )}
                     </div>
                     <p className="text-sm text-zinc-500">
-                      {expert.role},{" "}
+                      {expert.title || expert.role},{" "}
                       <span className="font-medium text-zinc-700 dark:text-zinc-300">
                         {expert.company}
                       </span>

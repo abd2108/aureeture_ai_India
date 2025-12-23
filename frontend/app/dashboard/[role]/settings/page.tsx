@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import {
   UploadCloud,
@@ -38,6 +38,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
+import { useToast } from "@/components/ui/use-toast";
 import { Separator } from "@/components/ui/separator";
 import {
   Select,
@@ -136,6 +137,7 @@ const FieldLabel = ({ label, required }: { label: string; required?: boolean }) 
 
 function StudentResumeTab() {
   const { profile } = useProfile();
+  const { toast } = useToast();
 
   const [fullName, setFullName] = useState(profile.name || "");
   const [email, setEmail] = useState(profile.email || "");
@@ -265,6 +267,93 @@ function StudentResumeTab() {
 
   const removeSkill = (skill: string) => {
     setSkills((prev) => prev.filter((s) => s !== skill));
+  };
+
+  const [saving, setSaving] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || "";
+
+  useEffect(() => {
+    const fetchProfile = async () => {
+      try {
+        const url = apiBase ? `${apiBase}/api/student/profile` : `/api/student/profile`;
+        const res = await fetch(url, { credentials: "include" });
+        if (!res.ok) return;
+        const data = await res.json();
+        const s = data?.data;
+        if (!s) return;
+
+        setFullName(s.fullName || profile.name || "");
+        setEmail(s.email || profile.email || "");
+        setPhone(s.phone || "");
+        setLinkedinUrl(s.linkedinUrl || "");
+        setResumeFile(
+          s.resumeFile
+            ? { name: s.resumeFile, uploadedAt: "" }
+            : resumeFile
+        );
+        setEducations(Array.isArray(s.educations) ? s.educations : []);
+        setExperiences(Array.isArray(s.experiences) ? s.experiences : []);
+        setProjects(Array.isArray(s.projects) ? s.projects : []);
+        setAwards(s.awards || "");
+        setLinks({ ...links, ...(s.links || {}) });
+        setSkills(Array.isArray(s.skills) ? s.skills : []);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error("Failed to load student profile", err);
+      } finally {
+        setInitialLoading(false);
+      }
+    };
+    fetchProfile();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [apiBase]);
+
+  const handleSave = async () => {
+    // Debug hook to confirm click
+    // eslint-disable-next-line no-console
+    console.log("Saving student profile...");
+    setSaving(true);
+    try {
+      const payload = {
+        fullName,
+        email,
+        phone,
+        linkedinUrl,
+        resumeFile: resumeFile?.name,
+        educations,
+        experiences,
+        projects,
+        awards,
+        links,
+        skills,
+      };
+
+      const url = apiBase ? `${apiBase}/api/student/profile` : `/api/student/profile`;
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const msg = await res.text();
+        throw new Error(msg || "Failed to save profile");
+      }
+
+      toast({ title: "Profile saved", description: "Your student profile was updated." });
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("Failed to save student profile", err);
+      toast({
+        title: "Save failed",
+        description: "Could not save profile. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -869,6 +958,50 @@ function StudentLocationTab() {
   const [sameLocation, setSameLocation] = useState(true);
   const [authorized, setAuthorized] = useState(false);
   const [stayInIndia, setStayInIndia] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || "";
+  const { toast } = useToast();
+
+  const handleSaveLocation = async () => {
+    setSaving(true);
+    try {
+      const payload = {
+        location: {
+          country,
+          state,
+          city,
+          postalCode,
+          workAuthorization: authorized,
+          willingToRelocate: !stayInIndia,
+        },
+      };
+
+      const url = apiBase ? `${apiBase}/api/student/profile` : `/api/student/profile`;
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const msg = await res.text();
+        throw new Error(msg || "Failed to save location");
+      }
+
+      toast({ title: "Location saved", description: "Your location details were updated." });
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("Failed to save location", err);
+      toast({
+        title: "Save failed",
+        description: "Could not save location. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <Card>
@@ -975,7 +1108,9 @@ function StudentLocationTab() {
         </div>
 
         <div className="flex justify-end border-t border-zinc-200 pt-4 dark:border-zinc-800">
-          <Button type="button">Save changes</Button>
+          <Button type="button" onClick={handleSaveLocation} disabled={saving}>
+            {saving ? "Saving..." : "Save changes"}
+          </Button>
         </div>
       </CardContent>
     </Card>

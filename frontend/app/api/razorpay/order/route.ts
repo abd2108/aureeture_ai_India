@@ -36,16 +36,24 @@ export async function POST(req: NextRequest) {
       }),
     });
 
+    const text = await res.text();
     if (!res.ok) {
-      const text = await res.text();
+      // Pass through Razorpay error details to help debug
       return NextResponse.json(
         { error: "Failed to create Razorpay order", details: text },
-        { status: 500 }
+        { status: res.status }
       );
     }
 
-    const data = await res.json();
-    return NextResponse.json(data);
+    try {
+      const data = JSON.parse(text);
+      return NextResponse.json(data);
+    } catch (e) {
+      return NextResponse.json(
+        { error: "Failed to parse Razorpay response", details: text },
+        { status: 500 }
+      );
+    }
   } catch (err: any) {
     return NextResponse.json(
       { error: err?.message || "Unexpected error creating Razorpay order" },

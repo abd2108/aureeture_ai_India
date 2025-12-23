@@ -10,10 +10,14 @@ const nextConfig = {
     unoptimized: true,
   },
   async rewrites() {
-    // Proxy all frontend calls to /api/* to the backend server.
-    // Uses NEXT_PUBLIC_API_BASE_URL if provided; otherwise defaults to localhost:5001
+    // Keep Razorpay API routes on the frontend (they need frontend env keys)
+    // and proxy everything else under /api/* to the backend.
     const backend = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:5001';
     return [
+      {
+        source: '/api/razorpay/:path*',
+        destination: '/api/razorpay/:path*',
+      },
       {
         source: '/api/:path*',
         destination: `${backend}/api/:path*`,

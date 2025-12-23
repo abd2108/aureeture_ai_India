@@ -89,6 +89,7 @@ export default function MentorOnboardingPage() {
   const [profile, setProfile] = useState<MentorProfile>(createEmptyProfile);
   const [resumeFileName, setResumeFileName] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || "";
 
   const currentStepIndex = STEP_ORDER.indexOf(step);
   const isLastStep = currentStepIndex === STEP_ORDER.length - 1;
@@ -119,15 +120,48 @@ export default function MentorOnboardingPage() {
 
   const handleComplete = async () => {
     setIsSaving(true);
+    try {
+      const payload = {
+        name: profile.name,
+        currentRole: profile.currentRole,
+        company: profile.company,
+        linkedinUrl: profile.linkedinUrl,
+        resumeUrl: profile.resumeUrl,
+        totalExperienceYears: profile.totalExperienceYears,
+        educationDegree: profile.educationDegree,
+        educationCollege: profile.educationCollege,
+        specializationTags: profile.specializationTags,
+        pricing: profile.pricing,
+        timezone: profile.timezone,
+        weeklyAvailability: profile.weeklyAvailability,
+        overrideAvailability: profile.overrideAvailability,
+        isVerified: profile.isVerified,
+        isOnline: profile.isOnline,
+      };
 
-    // Placeholder for real backend call.
-    await new Promise((resolve) => setTimeout(resolve, 700));
+      const url = apiBase ? `${apiBase}/api/role-onboarding/mentor` : `/api/role-onboarding/mentor`;
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(payload),
+      });
 
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem(ONBOARDING_KEY, "true");
+      if (!res.ok) {
+        throw new Error("Failed to save mentor profile");
+      }
+
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(ONBOARDING_KEY, "true");
+      }
+      router.replace("/dashboard/mentor/overview");
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error(err);
+      alert("Could not complete onboarding. Please try again.");
+    } finally {
+      setIsSaving(false);
     }
-    setIsSaving(false);
-    router.replace("/dashboard/mentor/overview");
   };
 
   return (

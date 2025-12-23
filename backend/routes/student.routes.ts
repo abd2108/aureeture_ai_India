@@ -2,8 +2,69 @@ import { Router } from "express";
 import Mentorship from "../models/mentorship.model";
 import User from "../models/user.model";
 import Profile from "../models/profile.model";
+import Student from "../models/student.model";
+import { requireAuth } from "../middleware/auth.middleware";
 
 const router = Router();
+
+// GET student profile (role: student)
+router.get("/student/profile", requireAuth, async (req, res) => {
+  try {
+    const clerkId = (req as any).auth?.userId;
+    if (!clerkId) return res.status(401).json({ message: "Unauthorized" });
+
+    const user = await User.findOne({ clerkId });
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    const student = await Student.findOne({ userId: user._id }).lean();
+    return res.json({ success: true, data: student || null });
+  } catch (error) {
+    console.error("Error fetching student profile:", error);
+    return res.status(500).json({ message: "An error occurred on the server." });
+  }
+});
+
+// Upsert student profile into Student collection
+router.post("/student/profile", requireAuth, async (req, res) => {
+  try {
+    const clerkId = (req as any).auth?.userId;
+    if (!clerkId) return res.status(401).json({ message: "Unauthorized" });
+
+    const user = await User.findOne({ clerkId });
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    const payload = req.body || {};
+
+    const student = await Student.findOneAndUpdate(
+      { userId: user._id },
+      {
+        $setOnInsert: { userId: user._id, role: "student" },
+        $set: {
+          fullName: payload.fullName,
+          email: payload.email,
+          phone: payload.phone,
+          linkedinUrl: payload.linkedinUrl,
+          resumeFile: payload.resumeFile,
+          educations: payload.educations ?? [],
+          experiences: payload.experiences ?? [],
+          projects: payload.projects ?? [],
+          awards: payload.awards,
+          links: payload.links ?? {},
+          skills: payload.skills ?? [],
+          location: payload.location,
+          availability: payload.availability,
+          preferences: payload.preferences,
+        },
+      },
+      { upsert: true, new: true }
+    );
+
+    return res.json({ success: true, data: student });
+  } catch (error) {
+    console.error("Error saving student profile:", error);
+    return res.status(500).json({ message: "An error occurred on the server." });
+  }
+});
 
 // GET /api/student/my-mentors?studentId=...
 router.get("/student/my-mentors", async (req, res) => {

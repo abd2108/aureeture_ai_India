@@ -15,6 +15,11 @@ export const requireAuth = (req: Request, res: Response, next: NextFunction) => 
     });
   }
 
-  (req as any).auth = auth; // so your controllers can access req.auth.userId
+  // so your controllers can access req.auth.userId
+  (req as any).auth = auth;
+  // also expose roleContext if the resolver ran earlier in the chain
+  if ((req as any).roleContext) {
+    (req as any).auth.roleContext = (req as any).roleContext;
+  }
   next();
 };

@@ -6,6 +6,8 @@ import ConditionalFooter from "@/components/conditional-footer"
 import SkipToContent from "@/components/skip-to-content"
 import Providers from "./providers";
 // Using system fonts to avoid Google Fonts loading issues
+
+
 const systemFonts = {
   inter: {
     variable: "--font-inter",

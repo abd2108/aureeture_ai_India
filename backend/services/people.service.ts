@@ -1,4 +1,5 @@
 import User from '../models/user.model';
+import Mentor from '../models/mentor.model';
 import Profile from '../models/profile.model';
 import Connection from '../models/connection.model';
 
@@ -8,8 +9,17 @@ export const getPeopleSuggestions = async (userId: string, page: number, limit: 
         throw new Error('User not found');
     }
 
+    // Only suggest mentors: gather mentor userIds
+    const mentorDocs = await Mentor.find({}, { userId: 1 }).lean();
+    const mentorUserIds = mentorDocs.map((m: any) => String(m.userId)).filter(Boolean);
+
     const skip = (page - 1) * limit;
-    const query: any = { userId: { $ne: user._id } };
+    const query: any = {
+        userId: {
+            $ne: user._id,
+            ...(mentorUserIds.length ? { $in: mentorUserIds } : {}),
+        },
+    };
 
     // Apply filters
     if (filters.skills) {
@@ -32,7 +42,10 @@ export const getPeopleSuggestions = async (userId: string, page: number, limit: 
         conn.requester.toString() === user._id.toString() ? conn.recipient : conn.requester
     );
 
-    query.userId = { $nin: [...connectedUserIds, user._id] };
+    query.userId = {
+        $nin: [...connectedUserIds, user._id],
+        ...(mentorUserIds.length ? { $in: mentorUserIds } : {}),
+    };
 
     const profiles = await Profile.find(query)
         .populate('userId', 'name avatar email')

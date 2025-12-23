@@ -3,6 +3,7 @@ import { Router } from "express";
 import MentorSession from "../models/mentorSession.model";
 import User from "../models/user.model";
 import Profile from "../models/profile.model";
+import Mentor from "../models/mentor.model";
 import MentorAvailability from "../models/mentorAvailability.model";
 
 const router = Router();
@@ -14,7 +15,8 @@ const router = Router();
  */
 const ensureDemoMentors = async () => {
   const existingSessions = await MentorSession.countDocuments();
-  if (existingSessions > 0) return;
+  const existingMentors = await Mentor.countDocuments();
+  if (existingSessions > 0 && existingMentors > 0) return;
 
   const demoMentors = [
     {
@@ -35,29 +37,58 @@ const ensureDemoMentors = async () => {
       name: "Sameer Khan",
       avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=SameerKhan",
     },
-    {
-      clerkId: "mentor_priya_singh",
-      email: "priya.singh@example.com",
-      name: "Priya Singh",
-      avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=PriyaSingh",
-    },
-    {
-      clerkId: "mentor_vikram_kumar",
-      email: "vikram.kumar@example.com",
-      name: "Vikram Kumar",
-      avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=VikramKumar",
-    },
-    {
-      clerkId: "mentor_ananya_gupta",
-      email: "ananya.gupta@example.com",
-      name: "Ananya Gupta",
-      avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=AnanyaGupta",
-    },
+    // {
+    //   clerkId: "mentor_priya_singh",
+    //   email: "priya.singh@example.com",
+    //   name: "Priya Singh",
+    //   avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=PriyaSingh",
+    // },
+    // {
+    //   clerkId: "mentor_vikram_kumar",
+    //   email: "vikram.kumar@example.com",
+    //   name: "Vikram Kumar",
+    //   avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=VikramKumar",
+    // },
+    // {
+    //   clerkId: "mentor_ananya_gupta",
+    //   email: "ananya.gupta@example.com",
+    //   name: "Ananya Gupta",
+    //   avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=AnanyaGupta",
+    // },
   ];
 
   for (const mentorData of demoMentors) {
     let user = await User.findOne({ clerkId: mentorData.clerkId });
     if (!user) user = await User.create(mentorData);
+
+    await Mentor.findOneAndUpdate(
+      { userId: user._id },
+      {
+        $setOnInsert: { userId: user._id, role: "mentor" },
+        $set: {
+          name: mentorData.name,
+          currentRole: "Mentor",
+          company: "Demo",
+          linkedinUrl: mentorData.email.replace("@", "://linkedin.com/in/"),
+          resumeUrl: "",
+          totalExperienceYears: 8,
+          educationDegree: "",
+          educationCollege: "",
+          specializationTags: ["Mentorship"],
+          pricing: {
+            expectedHourlyRate: 2500,
+            expectedHalfHourRate: 1200,
+            currency: "INR",
+          },
+          timezone: "Asia/Kolkata",
+          weeklyAvailability: [],
+          overrideAvailability: [],
+          isVerified: true,
+          isOnline: true,
+        },
+      },
+      { upsert: true }
+    );
 
     const profileData = {
       userId: user._id,
@@ -138,168 +169,135 @@ const computeAvailabilityText = (nextSessionStart?: Date) => {
 // GET /api/mentors
 router.get("/mentors", async (req, res) => {
   try {
-    // Optional: only for demo; does not override real mentors
     await ensureDemoMentors();
 
-    /**
-     * ✅ UNION LOGIC
-     * Source A: mentor-like profiles (real mentors who completed onboarding)
-     * Source B: mentorIds present in sessions (mentors who have sessions)
-     */
-    const mentorProfiles = await Profile.find({
-      onboardingComplete: true,
-      currentRole: { $exists: true, $ne: null },
-      currentCompany: { $exists: true, $ne: null },
-    })
+    const mentors = await Mentor.find({})
       .populate("userId", "name email avatar clerkId")
-      .limit(200)
       .lean();
 
-    const profileClerkIds = mentorProfiles
-      .map((p: any) => (p.userId as any)?.clerkId)
-      .filter((id: any): id is string => !!id);
-
-    const sessionMentorClerkIds = await MentorSession.distinct("mentorId");
-    const mentorClerkIds = Array.from(new Set([...profileClerkIds, ...sessionMentorClerkIds])).filter(Boolean);
-
-    if (mentorClerkIds.length === 0) {
+    if (!mentors.length) {
       return res.json({
         mentors: [],
         stats: { totalMentors: 0, avgHourlyRate: 0, activeSessions: 0, satisfaction: "0.0" },
       });
     }
 
-    // Users by clerkId
-    const users = await User.find({ clerkId: { $in: mentorClerkIds } }).lean();
-    const userByClerk = new Map<string, any>(users.map((u: any) => [u.clerkId, u]));
+    const userIds = mentors.map((m: any) => m.userId?._id).filter(Boolean);
+    const clerkIds = mentors
+      .map((m: any) => (m.userId as any)?.clerkId)
+      .filter((id: any): id is string => !!id);
 
-    // Profiles by clerkId (start with mentorProfiles, then pull missing)
-    const profileByClerk = new Map<string, any>();
-    mentorProfiles.forEach((p: any) => {
-      const cid = (p.userId as any)?.clerkId;
-      if (cid) profileByClerk.set(cid, p);
-    });
-
-    // Fetch missing profiles for mentors that exist only in sessions
-    const missingClerks = mentorClerkIds.filter((cid) => !profileByClerk.has(cid));
-    if (missingClerks.length > 0) {
-      const missingUsers = await User.find({ clerkId: { $in: missingClerks } }).lean();
-      missingUsers.forEach((u: any) => userByClerk.set(u.clerkId, u));
-
-      const missingUserIds = missingUsers.map((u: any) => u._id);
-      const missingProfiles = await Profile.find({
-        userId: { $in: missingUserIds },
-        onboardingComplete: true,
-      })
-        .populate("userId", "name email avatar clerkId")
-        .lean();
-
-      missingProfiles.forEach((p: any) => {
-        const cid = (p.userId as any)?.clerkId;
-        if (cid) profileByClerk.set(cid, p);
-      });
-    }
-
-    // Sessions for stats calculations
-    const allSessions = await MentorSession.find({ mentorId: { $in: mentorClerkIds } }).lean();
-
-    const mentors = await Promise.all(
-      mentorClerkIds.map(async (clerkId) => {
-        const u = userByClerk.get(clerkId);
-        const p = profileByClerk.get(clerkId);
-
-        const name = (u?.name || (p?.userId as any)?.name || "Mentor") as string;
-        const role = (p?.currentRole || "Professional") as string;
-        const company = (p?.currentCompany || "Company") as string;
-
-        const skills: string[] = Array.isArray(p?.skills) ? p.skills : [];
-        const expertise = skills.slice(0, 3);
-        const domain = inferDomain(role, skills);
-
-        // Experience: workHistory -> else fallback
-        let experienceYears = 0;
-        const workHistory = p?.workHistory || [];
-        if (Array.isArray(workHistory) && workHistory.length > 0) {
-          const withFrom = workHistory.filter((w: any) => w?.from);
-          if (withFrom.length > 0) {
-            const earliest = withFrom.reduce((a: any, b: any) =>
-              new Date(a.from) < new Date(b.from) ? a : b
-            );
-            const years = (Date.now() - new Date(earliest.from).getTime()) / (1000 * 60 * 60 * 24 * 365);
-            experienceYears = Math.max(0, Math.round(years));
-          }
-        }
-        if (!experienceYears) experienceYears = computeExperienceYearsFallback(role);
-
-        // Sessions for this mentor
-        const mentorSessions = allSessions.filter((s: any) => s.mentorId === clerkId);
-        const completedSessions = mentorSessions.filter((s: any) => s.status === "completed");
-        const reviews = completedSessions.length;
-        const rating = reviews > 0 ? 4.9 : 4.7; // mock until review system exists
-
-        // Price
-        const priced = mentorSessions.filter((s: any) => typeof s.amount === "number" && s.amount > 0);
-        const avgPrice =
-          priced.length > 0
-            ? Math.round(priced.reduce((sum: number, s: any) => sum + (s.amount || 0), 0) / priced.length)
-            : role.toLowerCase().includes("director")
-            ? 5000
-            : role.toLowerCase().includes("principal")
-            ? 4200
-            : role.toLowerCase().includes("lead")
-            ? 3500
-            : role.toLowerCase().includes("senior")
-            ? 2800
-            : role.toLowerCase().includes("staff")
-            ? 3000
-            : 2500;
-
-        // Availability from next upcoming session (simple)
-        const upcoming = mentorSessions
-          .filter((s: any) => s.status === "scheduled" && new Date(s.startTime) > new Date())
-          .sort((a: any, b: any) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
-        const nextSessionStart = upcoming.length ? new Date(upcoming[0].startTime) : undefined;
-        const availabilityText = computeAvailabilityText(nextSessionStart);
-
-        // Optional doc exists (not mandatory for showing availability)
-        await MentorAvailability.findOne({ mentorId: clerkId }).lean().catch(() => null);
-
-        const initials = name
-          .split(" ")
-          .map((n) => n[0])
-          .join("")
-          .toUpperCase()
-          .slice(0, 2);
-
-        const linkedinUrl =
-          p?.personalInfo?.linkedIn ||
-          `https://www.linkedin.com/in/${name.toLowerCase().replace(/\s+/g, "-")}`;
-
-        return {
-          id: clerkId,
-          name,
-          role,
-          company,
-          companyLogo: "",
-          avatarInitial: initials,
-          rating,
-          reviews,
-          expertise: expertise.length ? expertise : ["Mentorship"],
-          price: avgPrice,
-          availability: availabilityText,
-          domain,
-          experience: `${experienceYears} Yrs`,
-          verified: true,
-          linkedinUrl,
-        };
-      })
+    const profiles = await Profile.find({ userId: { $in: userIds } })
+      .populate("userId", "name email avatar clerkId")
+      .lean();
+    const profileByUser = new Map<string, any>(
+      profiles.map((p: any) => [String((p.userId as any)?._id), p])
     );
 
-    // Stats
-    const totalMentors = mentors.length;
+    // Sessions for stats
+    const allSessions = await MentorSession.find({ mentorId: { $in: clerkIds } }).lean();
+
+    const mapped = mentors.map((m: any) => {
+      const u = m.userId as any;
+      const p = profileByUser.get(String(u?._id));
+
+      const name = m.name || u?.name || "Mentor";
+      const professionalTitle = m.currentRole || p?.currentRole || "Professional";
+      // Display role should always be "Mentor" for student-facing listings
+      const role = "Mentor";
+      const company = m.company || p?.currentCompany || "Company";
+      const skills: string[] =
+        Array.isArray(m.specializationTags) && m.specializationTags.length
+          ? m.specializationTags
+          : Array.isArray(p?.skills)
+          ? p.skills
+          : [];
+      const expertise = skills.slice(0, 3);
+      const domain = inferDomain(professionalTitle, skills);
+
+      let experienceYears = 0;
+      if (typeof m.totalExperienceYears === "number") {
+        experienceYears = m.totalExperienceYears;
+      } else if (Array.isArray(p?.workHistory) && p.workHistory.length > 0) {
+        const withFrom = p.workHistory.filter((w: any) => w?.from);
+        if (withFrom.length > 0) {
+          const earliest = withFrom.reduce((a: any, b: any) =>
+            new Date(a.from) < new Date(b.from) ? a : b
+          );
+          const years =
+            (Date.now() - new Date(earliest.from).getTime()) / (1000 * 60 * 60 * 24 * 365);
+          experienceYears = Math.max(0, Math.round(years));
+        }
+      }
+      if (!experienceYears) experienceYears = computeExperienceYearsFallback(role);
+
+      const mentorSessions = allSessions.filter((s: any) => s.mentorId === u?.clerkId);
+      const completedSessions = mentorSessions.filter((s: any) => s.status === "completed");
+      const reviews = completedSessions.length;
+      const rating = reviews > 0 ? 4.9 : 4.7;
+
+      const priced = mentorSessions.filter(
+        (s: any) => typeof s.amount === "number" && s.amount > 0
+      );
+      const avgPrice =
+        priced.length > 0
+          ? Math.round(priced.reduce((sum: number, s: any) => sum + (s.amount || 0), 0) / priced.length)
+          : role.toLowerCase().includes("director")
+          ? 5000
+          : role.toLowerCase().includes("principal")
+          ? 4200
+          : role.toLowerCase().includes("lead")
+          ? 3500
+          : role.toLowerCase().includes("senior")
+          ? 2800
+          : role.toLowerCase().includes("staff")
+          ? 3000
+          : 2500;
+
+      const upcoming = mentorSessions
+        .filter((s: any) => s.status === "scheduled" && new Date(s.startTime) > new Date())
+        .sort(
+          (a: any, b: any) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime()
+        );
+      const nextSessionStart = upcoming.length ? new Date(upcoming[0].startTime) : undefined;
+      const availabilityText = computeAvailabilityText(nextSessionStart);
+
+      const initials = name
+        .split(" ")
+        .map((n: string) => n[0])
+        .join("")
+        .toUpperCase()
+        .slice(0, 2);
+
+      const linkedinUrl =
+        m.linkedinUrl ||
+        p?.personalInfo?.linkedIn ||
+        `https://www.linkedin.com/in/${name.toLowerCase().replace(/\s+/g, "-")}`;
+
+      return {
+        id: u?.clerkId,
+        name,
+        role,
+        title: professionalTitle,
+        company,
+        companyLogo: "",
+        avatarInitial: initials,
+        rating,
+        reviews,
+        expertise: expertise.length ? expertise : ["Mentorship"],
+        price: avgPrice,
+        availability: availabilityText,
+        domain,
+        experience: `${experienceYears} Yrs`,
+        verified: !!m.isVerified,
+        linkedinUrl,
+      };
+    });
+
+    const totalMentors = mapped.length;
     const avgHourlyRate =
-      mentors.length > 0
-        ? Math.round(mentors.reduce((sum, m) => sum + (m.price || 0), 0) / mentors.length)
+      mapped.length > 0
+        ? Math.round(mapped.reduce((sum, m) => sum + (m.price || 0), 0) / mapped.length)
         : 0;
 
     const sevenDaysFromNow = new Date();
@@ -313,12 +311,12 @@ router.get("/mentors", async (req, res) => {
     ).length;
 
     const avgSatisfaction =
-      mentors.length > 0
-        ? (mentors.reduce((sum, m) => sum + (m.rating || 0), 0) / mentors.length).toFixed(1)
+      mapped.length > 0
+        ? (mapped.reduce((sum, m) => sum + (m.rating || 0), 0) / mapped.length).toFixed(1)
         : "0.0";
 
     return res.json({
-      mentors,
+      mentors: mapped,
       stats: {
         totalMentors,
         avgHourlyRate,

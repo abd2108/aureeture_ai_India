@@ -14,9 +14,8 @@ const router = Router();
  * - It does NOT overwrite real mentors; it just creates demo users/profiles.
  */
 const ensureDemoMentors = async () => {
-  const existingSessions = await MentorSession.countDocuments();
-  const existingMentors = await Mentor.countDocuments();
-  if (existingSessions > 0 && existingMentors > 0) return;
+  // Disabled seeding of demo mentors to avoid hardcoded data and data bleed.
+  return;
 
   const demoMentors = [
     {

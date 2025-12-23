@@ -31,17 +31,15 @@ app.use(
     },
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
+    allowedHeaders: ["Content-Type", "Authorization", "x-active-role"],
     exposedHeaders: ["Authorization"],
   })
 );
 
-
-
-
 // Body parsing
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
 app.use(clerkMiddleware());
 app.use(syncUserMiddleware);
 app.use(roleResolverMiddleware);

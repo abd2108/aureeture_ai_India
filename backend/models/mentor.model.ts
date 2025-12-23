@@ -36,8 +36,23 @@ export interface IMentor extends Document {
   timezone: string;
   weeklyAvailability: IMentorWeeklySlot[];
   overrideAvailability: IMentorOverrideSlot[];
+  /**
+   * Indicates the mentor has completed the onboarding wizard and unlocked the dashboard.
+   */
+  isOnboarded: boolean;
+  onboardedAt?: Date;
+  bio?: string;
+  location?: string;
+  mentoringFocus?: string;
+  idealMentee?: string;
+  languages?: string;
+  minNoticeHours?: number | null;
+  maxSessionsPerWeek?: number | null;
+  preSessionNotesRequired?: boolean;
+  allowRecording?: boolean;
   isVerified: boolean;
   isOnline: boolean;
+  avatarUrl?: string;
 }
 
 const WeeklySlotSchema = new Schema<IMentorWeeklySlot>(
@@ -81,8 +96,20 @@ const MentorSchema = new Schema<IMentor>(
     timezone: { type: String, default: "Asia/Kolkata" },
     weeklyAvailability: { type: [WeeklySlotSchema], default: [] },
     overrideAvailability: { type: [OverrideSlotSchema], default: [] },
+    isOnboarded: { type: Boolean, default: false, index: true },
+    onboardedAt: { type: Date },
+    bio: { type: String, default: "" },
+    location: { type: String, default: "" },
+    mentoringFocus: { type: String, default: "" },
+    idealMentee: { type: String, default: "" },
+    languages: { type: String, default: "" },
+    minNoticeHours: { type: Number, default: null },
+    maxSessionsPerWeek: { type: Number, default: null },
+    preSessionNotesRequired: { type: Boolean, default: false },
+    allowRecording: { type: Boolean, default: false },
     isVerified: { type: Boolean, default: false },
     isOnline: { type: Boolean, default: true },
+    avatarUrl: { type: String, default: "" },
   },
   { timestamps: true }
 );

@@ -4,10 +4,12 @@ import User from "../models/user.model";
 import Profile from "../models/profile.model";
 import Student from "../models/student.model";
 import { requireAuth } from "../middleware/auth.middleware";
+import { requireRole } from "../middleware/requireRole.middleware";
 
 const router = Router();
 
 // GET student profile (role: student)
+// Relaxed requireRole here so the layout can check for profile existence without getting a 403
 router.get("/student/profile", requireAuth, async (req, res) => {
   try {
     const clerkId = (req as any).auth?.userId;
@@ -67,7 +69,7 @@ router.post("/student/profile", requireAuth, async (req, res) => {
 });
 
 // GET /api/student/my-mentors?studentId=...
-router.get("/student/my-mentors", async (req, res) => {
+router.get("/student/my-mentors", requireRole("student"), async (req, res) => {
   try {
     const { studentId } = req.query as { studentId?: string };
     if (!studentId) return res.status(400).json({ message: "studentId is required" });

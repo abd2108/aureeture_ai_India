@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { getProfile, updateProfile, createProfile } from '../controllers/profile.controller';
 import { requireAuth } from '../middleware/auth.middleware';
+import { requireRole } from '../middleware/requireRole.middleware';
 import { validateRequest } from '../middleware/validate.middleware';
 import { createProfileSchema, updateProfileSchema } from '../utils/validationSchemas';
 import * as ProfileService from '../services/profile.service';
@@ -21,56 +22,17 @@ router.post('/', validateRequest(createProfileSchema), createProfile);
 router.put('/', validateRequest(updateProfileSchema), updateProfile);
 
 // GET /api/profile/student - Get student profile with all data formatted
-router.get('/student', async (req: any, res: any) => {
+router.get('/student', requireRole("student"), async (req: any, res: any) => {
   try {
     const userId = req.auth?.userId;
     if (!userId) {
       return res.status(401).json({ success: false, message: 'Unauthorized' });
     }
     
-    let profile = await ProfileService.getUserProfile(userId);
-    
-    // If profile doesn't exist, create a default one
-    if (!profile) {
-      const user = await (await import('../models/user.model')).default.findOne({ clerkId: userId });
-      if (!user) {
-        return res.status(404).json({ success: false, message: 'User not found' });
-      }
-      
-      profile = await ProfileService.createUserProfile(userId, {
-        careerStage: 'Professional',
-        longTermGoal: 'Become a lead animator',
-        currentRole: 'Animator',
-        currentCompany: 'Disney',
-        joinDate: 'Jul 2025',
-        personalInfo: {
-          location: 'Mumbai, India',
-        },
-        skills: ['3D Animation', 'Maya', 'Blender', 'After Effects', 'Storytelling'],
-        tasks: {
-          todo: [],
-          later: [],
-          done: [],
-        },
-        careerGoals: [
-          { name: 'Portfolio', progress: 75 },
-          { name: 'Networking', progress: 60 },
-          { name: 'Skills', progress: 90 },
-          { name: 'Experience', progress: 45 },
-        ],
-        analytics: {
-          profileCompletion: 85,
-          skillScore: 847,
-          views: 127,
-          connects: 89,
-          applications: 12,
-          matches: 24,
-        },
-      });
-    }
+    const profile = await ProfileService.getUserProfile(userId);
 
     // Format timeline items from workHistory, education, and projects
-    const timelineItems = [];
+    const timelineItems: any[] = [];
     
     // Add work history
     if (profile.workHistory && profile.workHistory.length > 0) {
@@ -121,49 +83,45 @@ router.get('/student', async (req: any, res: any) => {
     }
 
     // Get user info - ensure profile is populated
-    const userDoc = await (await import('../models/user.model')).default.findById((profile as any).userId);
-    const user = userDoc || (profile as any).userId;
+    const userDoc = profile ? await (await import('../models/user.model')).default.findById((profile as any).userId) : null;
+    const user = userDoc || (profile as any)?.userId;
     
     // Format response with actual user data
     const response = {
       personalInfo: {
-        name: user?.name || (typeof user === 'object' && user?.name) || 'Your name',
-        email: user?.email || (typeof user === 'object' && user?.email) || '',
-        phone: profile.personalInfo?.phone || '',
-        location: profile.personalInfo?.location || profile.preferences?.location?.[0] || 'Your city',
-        linkedin: profile.personalInfo?.linkedIn || '',
+        name: user?.name || (typeof user === 'object' && (user as any)?.name) || '',
+        email: user?.email || (typeof user === 'object' && (user as any)?.email) || '',
+        phone: profile?.personalInfo?.phone || '',
+        location: profile?.personalInfo?.location || profile?.preferences?.location?.[0] || '',
+        linkedin: profile?.personalInfo?.linkedIn || '',
       },
       careerSnapshot: {
-        careerStage: profile.careerStage || 'Professional',
-        longTermGoal: profile.longTermGoal || 'Become a lead animator',
-        currentRole: profile.currentRole || 'Animator',
-        currentCompany: profile.currentCompany || 'Disney',
-        joinDate: profile.joinDate || 'Jul 2025',
+        careerStage: profile?.careerStage || '',
+        longTermGoal: profile?.longTermGoal || '',
+        currentRole: profile?.currentRole || '',
+        currentCompany: profile?.currentCompany || '',
+        joinDate: profile?.joinDate || '',
       },
-      timelineItems: timelineItems.sort((a, b) => {
-        const aDate = a.isCurrent ? new Date() : (a.endDate || a.startDate || new Date(0));
-        const bDate = b.isCurrent ? new Date() : (b.endDate || b.startDate || new Date(0));
-        return bDate.getTime() - aDate.getTime();
-      }),
-      skills: profile.skills || [],
-      tasks: profile.tasks || {
+      timelineItems: timelineItems
+        .sort((a, b) => {
+          const aDate = a.isCurrent ? new Date() : (a.endDate || a.startDate || new Date(0));
+          const bDate = b.isCurrent ? new Date() : (b.endDate || b.startDate || new Date(0));
+          return bDate.getTime() - aDate.getTime();
+        }),
+      skills: profile?.skills || [],
+      tasks: profile?.tasks || {
         todo: [],
         later: [],
         done: [],
       },
-      careerGoals: profile.careerGoals || [
-        { name: 'Portfolio', progress: 75 },
-        { name: 'Networking', progress: 60 },
-        { name: 'Skills', progress: 90 },
-        { name: 'Experience', progress: 45 },
-      ],
-      analytics: profile.analytics || {
-        profileCompletion: 85,
-        skillScore: 847,
-        views: 127,
-        connects: 89,
-        applications: 12,
-        matches: 24,
+      careerGoals: profile?.careerGoals || [],
+      analytics: profile?.analytics || {
+        profileCompletion: 0,
+        skillScore: 0,
+        views: 0,
+        connects: 0,
+        applications: 0,
+        matches: 0,
       },
     };
 
@@ -175,7 +133,7 @@ router.get('/student', async (req: any, res: any) => {
 });
 
 // PUT /api/profile/student - Update student profile
-router.put('/student', async (req: any, res: any) => {
+router.put('/student', requireRole("student"), async (req: any, res: any) => {
   try {
     const userId = req.auth.userId;
     const updateData = req.body;

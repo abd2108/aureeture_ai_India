@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import mongoose from 'mongoose';
+import crypto from 'crypto';
 import MentorSession from '../models/mentorSession.model';
 import MentorAvailability from '../models/mentorAvailability.model';
 import MenteePlan from '../models/menteePlan.model';
@@ -7,8 +8,28 @@ import MenteeMessage from '../models/menteeMessage.model';
 import Mentorship from '../models/mentorship.model';
 import { generateAgoraToken } from '../services/agoraToken.service';
 import { sendEmail, generateSessionConfirmationEmail } from '../services/email.service';
+import { requireRole } from '../middleware/requireRole.middleware';
 
 const router = Router();
+
+// FIX: Role-aware guard updated to allow students to access confirm-payment
+router.use((req, res, next) => {
+  const path = req.path || "";
+  
+  // ALLOW: confirm-payment must be accessible by students after they pay
+  // Use endsWith or regex to be more robust against mounting differences
+  if (path.includes("/mentor-sessions/confirm-payment")) {
+    return next();
+  }
+
+  if (path.startsWith("/mentor-sessions") || path.startsWith("/mentor/")) {
+    return requireRole("mentor")(req, res, next);
+  }
+  if (path.startsWith("/student-sessions")) {
+    return requireRole("student")(req, res, next);
+  }
+  return next();
+});
 
 
 const upsertMentorshipFromSession = async (mentorId: string, studentId?: string, studentEmail?: string, studentName?: string, title?: string) => {
@@ -94,8 +115,11 @@ const getOrCreatePlanByMentorship = async (mentorId: string, mentorshipId: mongo
   return MenteePlan.create({ mentorId, mentorshipId, progress: 0, milestones: [], notes: '' });
 };
 
-// Helper to ensure demo sessions exist
+const shouldSeedDemo = process.env.ENABLE_DEMO_SESSIONS === 'true';
+
+// Helper to ensure demo sessions exist (only when explicitly enabled)
 const ensureDemoSessionsForMentor = async (mentorId: string, forceCreate: boolean = false) => {
+  if (!shouldSeedDemo && !forceCreate) return;
   const count = await MentorSession.countDocuments({ mentorId });
   if (count >= 3 && !forceCreate) return;
   
@@ -454,7 +478,7 @@ router.get('/mentor/pending-requests', async (req, res) => {
       endTime: { $gte: oneDayAgo },
     }).sort({ endTime: -1 }).limit(5);
 
-    const requests = [];
+    const requests: any[] = [];
 
     // Add recent paid bookings
     recentPaidSessions.forEach(session => {
@@ -1174,26 +1198,74 @@ router.post('/mentor-sessions/confirm-payment', async (req, res) => {
       endTime,
       amount,
       paymentId,
+      orderId,
+      razorpaySignature,
       mentorEmail,
       mentorName,
     } = req.body;
-    if (!mentorId || !studentName || !title || !startTime || !endTime) {
+
+    // Enhanced logging for debugging
+    console.log('[confirm-payment] Received request:', {
+      mentorId,
+      studentId,
+      studentName,
+      title,
+      orderId,
+      paymentId,
+      hasSignature: !!razorpaySignature
+    });
+
+    if (!mentorId || !studentName || !title || !startTime || !endTime || !paymentId || !orderId || !razorpaySignature) {
+      console.error('[confirm-payment] Missing required fields:', {
+        mentorId: !!mentorId,
+        studentName: !!studentName,
+        title: !!title,
+        startTime: !!startTime,
+        endTime: !!endTime,
+        paymentId: !!paymentId,
+        orderId: !!orderId,
+        razorpaySignature: !!razorpaySignature
+      });
       return res.status(400).json({
-        message: 'mentorId, studentName, title, startTime, and endTime are required.',
+        message: 'mentorId, studentName, title, startTime, endTime, orderId, paymentId, and razorpaySignature are required.',
       });
     }
+
+    const secret = process.env.RAZORPAY_KEY_SECRET;
+    if (!secret) {
+      console.error('[confirm-payment] RAZORPAY_KEY_SECRET is missing from environment');
+      return res.status(500).json({ message: 'Razorpay secret is not configured on the server.' });
+    }
+
     const start = new Date(startTime);
     const end = new Date(endTime);
     if (isNaN(start.getTime()) || isNaN(end.getTime()) || end <= start) {
+      console.error('[confirm-payment] Invalid dates:', { startTime, endTime });
       return res.status(400).json({ message: 'Invalid startTime/endTime values.' });
     }
+
+    // Verify signature from Razorpay
+    const expectedSignature = crypto
+      .createHmac('sha256', secret)
+      .update(`${orderId}|${paymentId}`)
+      .digest('hex');
+
+    if (expectedSignature !== razorpaySignature) {
+      console.error('[confirm-payment] Signature mismatch:', { expectedSignature, razorpaySignature });
+      return res.status(400).json({ message: 'Payment signature verification failed.' });
+    }
+
     const durationMinutes = Math.round((end.getTime() - start.getTime()) / 60_000);
     const sessionId = `session-${Date.now()}`;
     const meetingLink = `https://meet.jit.si/aureeture-${sessionId}`;
-    const agoraChannel = `session-${Date.now()}-${mentorId.slice(-8)}`;
+    const mentorIdStr = String(mentorId);
+    const agoraChannel = `session-${Date.now()}-${mentorIdStr.slice(-8)}`;
+
+    console.log('[confirm-payment] Creating MentorSession...');
     const session = await MentorSession.create({
       mentorId,
       studentId,
+      menteeId: studentId,
       studentName,
       studentEmail,
       title,
@@ -1208,9 +1280,22 @@ router.post('/mentor-sessions/confirm-payment', async (req, res) => {
       agoraChannel,
       amount,
       paymentId,
+      orderId,
+      razorpaySignature,
       rescheduleCount: 0,
       rescheduleRequests: [],
     });
+
+    console.log('[confirm-payment] Session created:', session._id);
+
+    // Handle mentorship upsert to track the mentee
+    try {
+      await upsertMentorshipFromSession(mentorId, studentId, studentEmail, studentName, title);
+    } catch (mentorshipErr) {
+      console.error('[confirm-payment] Mentorship upsert failed (non-blocking):', mentorshipErr);
+    }
+
+    // Email notifications (non-blocking)
     if (studentEmail) {
       const studentEmailContent = generateSessionConfirmationEmail(
         studentName,
@@ -1221,12 +1306,15 @@ router.post('/mentor-sessions/confirm-payment', async (req, res) => {
         meetingLink,
         false
       );
-      await sendEmail({
+      sendEmail({
         to: studentEmail,
         subject: studentEmailContent.subject,
         html: studentEmailContent.html,
+      }).catch((err) => {
+        console.error('Failed to send student confirmation email:', err);
       });
     }
+
     if (mentorEmail) {
       const mentorEmailContent = generateSessionConfirmationEmail(
         mentorName || 'Mentor',
@@ -1237,19 +1325,25 @@ router.post('/mentor-sessions/confirm-payment', async (req, res) => {
         meetingLink,
         true
       );
-      await sendEmail({
+      sendEmail({
         to: mentorEmail,
         subject: mentorEmailContent.subject,
         html: mentorEmailContent.html,
+      }).catch((err) => {
+        console.error('Failed to send mentor confirmation email:', err);
       });
     }
-    res.status(201).json({
+
+    return res.status(201).json({
       session,
-      message: 'Session confirmed and notifications sent',
+      message: 'Session confirmed, signature verified, and notifications sent',
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error confirming payment and creating session:', error);
-    res.status(500).json({ message: 'An error occurred on the server.' });
+    return res.status(500).json({ 
+      message: 'An error occurred while confirming your session. Please contact support.',
+      error: error.message 
+    });
   }
 });
 let paymentHistory: any[] = [];

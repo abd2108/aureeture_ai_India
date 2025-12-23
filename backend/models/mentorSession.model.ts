@@ -8,6 +8,7 @@ export type BookingType = 'paid' | 'free' | 'manual';
 export interface IMentorSession extends Document {
   mentorId: string; // Clerk userId for the mentor
   studentId?: string; // Clerk userId for the student
+  menteeId?: string; // Alias for studentId for clarity
   studentName: string;
   studentEmail?: string;
   title: string;
@@ -41,6 +42,8 @@ export interface IMentorSession extends Document {
   amount?: number;
   currency?: string;
   paymentId?: string;
+  orderId?: string;
+  razorpaySignature?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -49,6 +52,7 @@ const MentorSessionSchema = new Schema<IMentorSession>(
   {
     mentorId: { type: String, required: true, index: true },
     studentId: { type: String, index: true },
+    menteeId: { type: String, index: true },
     studentName: { type: String, required: true },
     studentEmail: { type: String },
     title: { type: String, required: true },
@@ -94,6 +98,8 @@ const MentorSessionSchema = new Schema<IMentorSession>(
     amount: { type: Number },
     currency: { type: String, default: 'INR' },
     paymentId: { type: String },
+    orderId: { type: String },
+    razorpaySignature: { type: String },
   },
   { timestamps: true }
 );

@@ -11,12 +11,17 @@ const findUserByClerk = async (clerkId: string) => {
 export const upsertMentor = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const clerkId = (req as any).auth?.userId;
-    if (!clerkId) return res.status(401).json({ success: false, error: { message: "Unauthorized" } });
+    if (!clerkId) {
+      return res.status(401).json({ success: false, error: { message: "Unauthorized" } });
+    }
 
     const user = await findUserByClerk(clerkId);
-    if (!user) return res.status(404).json({ success: false, error: { message: "User not found" } });
+    if (!user) {
+      return res.status(404).json({ success: false, error: { message: "User not found" } });
+    }
 
     const payload = req.body || {};
+
     const mentor = await Mentor.findOneAndUpdate(
       { userId: user._id },
       {
@@ -40,6 +45,18 @@ export const upsertMentor = async (req: Request, res: Response, next: NextFuncti
           overrideAvailability: payload.overrideAvailability ?? [],
           isVerified: payload.isVerified ?? false,
           isOnline: payload.isOnline ?? true,
+          isOnboarded: true,
+          onboardedAt: new Date(),
+          bio: payload.bio ?? "",
+          location: payload.location ?? "",
+          mentoringFocus: payload.mentoringFocus ?? "",
+          idealMentee: payload.idealMentee ?? "",
+          languages: payload.languages ?? "",
+          minNoticeHours: payload.minNoticeHours ?? null,
+          maxSessionsPerWeek: payload.maxSessionsPerWeek ?? null,
+          preSessionNotesRequired: payload.preSessionNotesRequired ?? false,
+          allowRecording: payload.allowRecording ?? false,
+          avatarUrl: payload.avatarUrl ?? "",
         },
         $setOnInsert: { role: "mentor", userId: user._id },
       },
@@ -92,6 +109,54 @@ export const upsertStudent = async (req: Request, res: Response, next: NextFunct
     );
 
     return res.status(200).json({ success: true, data: student });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const getMentorProfile = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const clerkId = (req as any).auth?.userId;
+    if (!clerkId) {
+      return res.status(401).json({ success: false, error: { message: "Unauthorized" } });
+    }
+
+    const user = await findUserByClerk(clerkId);
+    if (!user) {
+      return res.status(404).json({ success: false, error: { message: "User not found" } });
+    }
+
+    const mentor = await Mentor.findOne({ userId: user._id }).lean();
+    return res.status(200).json({
+      success: true,
+      data: mentor || null,
+      isOnboarded: !!mentor?.isOnboarded,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const getMentorOnboardingStatus = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const clerkId = (req as any).auth?.userId;
+    if (!clerkId) {
+      return res.status(401).json({ success: false, error: { message: "Unauthorized" } });
+    }
+
+    const user = await findUserByClerk(clerkId);
+    if (!user) {
+      return res.status(404).json({ success: false, error: { message: "User not found" } });
+    }
+
+    const mentor = await Mentor.findOne({ userId: user._id }).select("isOnboarded onboardedAt").lean();
+    return res.status(200).json({
+      success: true,
+      data: {
+        isOnboarded: !!mentor?.isOnboarded,
+        onboardedAt: mentor?.onboardedAt || null,
+      },
+    });
   } catch (err) {
     next(err);
   }

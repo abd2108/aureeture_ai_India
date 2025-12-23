@@ -36,6 +36,8 @@ export interface MentorProfile {
   company: string;
   linkedinUrl: string;
   resumeUrl?: string;
+  bio?: string;
+  location?: string;
 
   totalExperienceYears: number | null;
   educationDegree: string;
@@ -50,6 +52,15 @@ export interface MentorProfile {
 
   isVerified: boolean;
   isOnline: boolean;
+  isOnboarded?: boolean;
+  mentoringFocus?: string;
+  idealMentee?: string;
+  languages?: string;
+  minNoticeHours?: number | null;
+  maxSessionsPerWeek?: number | null;
+  preSessionNotesRequired?: boolean;
+  allowRecording?: boolean;
+  avatarUrl?: string;
 
   createdAt?: string;
   updatedAt?: string;

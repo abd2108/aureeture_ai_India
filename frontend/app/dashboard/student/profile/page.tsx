@@ -218,7 +218,7 @@ const ProfilePageDashboard: FC<ProfilePageDashboardProps> = ({
 
   useEffect(() => {
     const fetchProfile = async () => {
-      if (!isLoaded || !user?.id || !apiBase) {
+      if (!isLoaded || !user?.id) {
         setLoading(false);
         return;
       }
@@ -226,15 +226,17 @@ const ProfilePageDashboard: FC<ProfilePageDashboardProps> = ({
       try {
         setLoading(true);
         setError(null);
-        
-        // Get auth token from Clerk
-        const token = await getToken();
-        
-        const res = await fetch(`${apiBase}/api/profile/student`, {
+
+        const token = await getToken?.();
+        const endpoint = apiBase
+          ? `${apiBase}/api/student/profile`
+          : "/api/student/profile";
+
+        const res = await fetch(endpoint, {
           method: "GET",
           headers: {
             "Content-Type": "application/json",
-            "Authorization": `Bearer ${token}`,
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
           },
           credentials: "include",
         });
@@ -244,87 +246,124 @@ const ProfilePageDashboard: FC<ProfilePageDashboardProps> = ({
         }
 
         const result = await res.json();
-        if (result.success && result.data) {
-          const data = result.data;
-          
-          // Update profile data - prioritize backend data, fallback to Clerk user data
-          setProfileData({
-            name: data.personalInfo?.name || user?.fullName || user?.firstName || profile.name || "Your name",
-            email: data.personalInfo?.email || user?.primaryEmailAddress?.emailAddress || profile.email || "",
-            phone: data.personalInfo?.phone || "",
-            location: data.personalInfo?.location || profile.location || "Your city",
-            linkedin: data.personalInfo?.linkedin || "",
+        const data = result?.data;
+
+        if (!data) {
+          setTimelineItems([]);
+          setSkills([]);
+          setTasks({ todo: [], later: [], done: [] });
+          setSnapshotData({
+            careerStage: '',
+            longTermGoal: '',
+            currentRole: '',
+            company: '',
+            joinDate: ''
           });
-
-          // Update timeline items
-          if (data.timelineItems) {
-            setTimelineItems(data.timelineItems.map((item: any) => ({
-              ...item,
-              startDate: item.startDate ? new Date(item.startDate) : undefined,
-              endDate: item.endDate ? new Date(item.endDate) : undefined,
-            })));
-          }
-
-          // Update skills
-          if (data.skills) {
-            setSkills(data.skills.map((skill: string, index: number) => ({
-              id: index + 1,
-              name: skill,
-            })));
-          }
-
-          // Update tasks
-          if (data.tasks) {
-            setTasks({
-              todo: data.tasks.todo || [],
-              later: data.tasks.later || [],
-              done: data.tasks.done || [],
-            });
-          }
-
-          // Update snapshot data
-          if (data.careerSnapshot) {
-            setSnapshotData({
-              careerStage: data.careerSnapshot.careerStage,
-              longTermGoal: data.careerSnapshot.longTermGoal,
-              currentRole: data.careerSnapshot.currentRole,
-              company: data.careerSnapshot.currentCompany,
-              joinDate: data.careerSnapshot.joinDate,
-            });
-          }
-
-          // Update analytics
-          if (data.analytics) {
-            setAnalytics({
-              profileCompletion: data.analytics.profileCompletion,
-              skillScore: data.analytics.skillScore,
-              connections: data.analytics.connects,
-              applications: data.analytics.applications,
-              jobMatches: data.analytics.matches,
-              chartData: [
-                { name: 'Views', value: data.analytics.views },
-                { name: 'Connects', value: data.analytics.connects },
-                { name: 'Applies', value: data.analytics.applications },
-                { name: 'Matches', value: data.analytics.matches },
-              ],
-            });
-          }
-
-          // Update career goals
-          if (data.careerGoals) {
-            setCareerGoals(data.careerGoals);
-          }
+          setAnalytics({
+            profileCompletion: 0,
+            skillScore: 0,
+            connections: 0,
+            applications: 0,
+            jobMatches: 0,
+            chartData: [
+              { name: 'Views', value: 0 },
+              { name: 'Connects', value: 0 },
+              { name: 'Applies', value: 0 },
+              { name: 'Matches', value: 0 },
+            ],
+          });
+          setCareerGoals([]);
+          setLoading(false);
+          return;
         }
+
+        setProfileData({
+          name: data.fullName || user.fullName || user.firstName || profile.name || "",
+          email: data.email || user.primaryEmailAddress?.emailAddress || profile.email || "",
+          phone: data.phone || "",
+          location: data.location?.city || "",
+          linkedin: data.linkedinUrl || "",
+        });
+
+        const timeline: TimelineItem[] = [];
+        (data.experiences || []).forEach((exp: any, idx: number) => {
+          timeline.push({
+            id: idx + 1,
+            type: "work",
+            title: exp.role || "Work",
+            subtitle: exp.company || exp.city || "",
+            description: exp.description || "",
+            startDate: exp.startDate ? new Date(exp.startDate) : undefined,
+            endDate: exp.endDate ? new Date(exp.endDate) : undefined,
+            isCurrent: !exp.endDate,
+          });
+        });
+        (data.educations || []).forEach((edu: any, idx: number) => {
+          timeline.push({
+            id: 1000 + idx,
+            type: "education",
+            title: edu.degree || "Education",
+            subtitle: edu.school || edu.major || "",
+            description: edu.major || "",
+            startDate: edu.startYear ? new Date(`${edu.startYear}-01-01`) : undefined,
+            endDate: edu.endYear ? new Date(`${edu.endYear}-01-01`) : undefined,
+            isCurrent: !edu.endYear,
+          });
+        });
+        (data.projects || []).forEach((proj: any, idx: number) => {
+          timeline.push({
+            id: 2000 + idx,
+            type: "project",
+            title: proj.name || "Project",
+            subtitle: proj.description || "",
+            description: proj.description || "",
+            startDate: proj.startYear ? new Date(`${proj.startYear}-01-01`) : undefined,
+            endDate: proj.endYear ? new Date(`${proj.endYear}-01-01`) : undefined,
+            isCurrent: !proj.endYear,
+          });
+        });
+        setTimelineItems(timeline);
+
+        setSkills(
+          (data.skills || []).map((skill: string, index: number) => ({
+            id: index + 1,
+            name: skill,
+          }))
+        );
+
+        setSnapshotData({
+          careerStage: data.preferences?.workModel || '',
+          longTermGoal: data.awards || '',
+          currentRole: data.experiences?.[0]?.role || '',
+          company: data.experiences?.[0]?.company || '',
+          joinDate: data.experiences?.[0]?.startDate || '',
+        });
+
+        setAnalytics({
+          profileCompletion: 0,
+          skillScore: 0,
+          connections: 0,
+          applications: 0,
+          jobMatches: 0,
+          chartData: [
+            { name: 'Views', value: 0 },
+            { name: 'Connects', value: 0 },
+            { name: 'Applies', value: 0 },
+            { name: 'Matches', value: 0 },
+          ],
+        });
+
+        setCareerGoals([]);
+        setTasks({ todo: [], later: [], done: [] });
       } catch (err: any) {
         console.error("Error fetching profile:", err);
         setError(err.message || "Failed to load profile");
-        // Even on error, use Clerk user data as fallback
         if (user) {
           setProfileData({
-            name: user.fullName || user.firstName || "Your name",
+            name: user.fullName || user.firstName || "",
             email: user.primaryEmailAddress?.emailAddress || "",
             phone: "",
-            location: profile.location || "Your city",
+            location: profile.location || "",
             linkedin: "",
           });
         }
@@ -333,22 +372,8 @@ const ProfilePageDashboard: FC<ProfilePageDashboardProps> = ({
       }
     };
 
-    if (isLoaded && user?.id && apiBase && getToken!== null) {
-      fetchProfile();
-    } else if (isLoaded && user) {
-      // If no API base URL, use Clerk user data
-      setProfileData({
-        name: user.fullName || user.firstName || "Your name",
-        email: user.primaryEmailAddress?.emailAddress || "",
-        phone: "",
-        location: profile.location || "Your city",
-        linkedin: "",
-      });
-      setLoading(false);
-    } else {
-      setLoading(false);
-    }
-  }, [isLoaded, user?.id, apiBase, getToken, user]);
+    fetchProfile();
+  }, [isLoaded, user, apiBase, getToken, profile.name, profile.email, profile.location]);
 
   // keep local profileData in sync when global profile changes
   useEffect(() => {
@@ -363,49 +388,15 @@ const ProfilePageDashboard: FC<ProfilePageDashboardProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile.name, profile.email, profile.location]);
   
-  const [timelineItems, setTimelineItems] = useState<TimelineItem[]>([
-    {
-      id: 1,
-      type: 'education',
-      title: 'IIT Data Science',
-      subtitle: '2021 - 2025',
-      description: 'GPA: 8.7/10',
-      startDate: new Date(2021, 0, 1),
-      endDate: new Date(2025, 5, 30),
-      isCurrent: false,
-    },
-    {
-      id: 2,
-      type: 'work',
-      title: 'Animator',
-      subtitle: 'Disney',
-      description: 'Jul 2025 - Present',
-      startDate: new Date(2025, 6, 1),
-      endDate: undefined,
-      isCurrent: true,
-    },
-    {
-      id: 3,
-      type: 'project',
-      title: '3D Animation Portfolio',
-      subtitle: 'Personal Project',
-      description: 'Character animation & VFX',
-      startDate: new Date(2024, 0, 1),
-      endDate: new Date(2024, 5, 30),
-      isCurrent: false,
-    },
-  ]);
+  const [timelineItems, setTimelineItems] = useState<TimelineItem[]>([]);
   
-  const [skills, setSkills] = useState<Skill[]>([
-    { id: 1, name: '3D Animation' }, { id: 2, name: 'Maya' }, { id: 3, name: 'Blender' },
-    { id: 4, name: 'After Effects' }, { id: 5, name: 'Storytelling' }
-  ]);
+  const [skills, setSkills] = useState<Skill[]>([]);
   const [newSkill, setNewSkill] = useState('');
 
   const [tasks, setTasks] = useState<{ todo: Task[], later: Task[], done: Task[] }>({
-    todo: [{ id: 1, title: 'Complete animation reel', priority: 'high', deadline: new Date() }],
-    later: [{ id: 2, title: 'Learn Houdini basics', priority: 'low' }],
-    done: [{ id: 3, title: 'Finish modeling course', priority: 'high' }]
+    todo: [],
+    later: [],
+    done: []
   });
   
   const [isTaskModalOpen, setTaskModalOpen] = useState(false);
@@ -436,40 +427,30 @@ const ProfilePageDashboard: FC<ProfilePageDashboardProps> = ({
 
   // --- STATE DATA ---
   const [snapshotData, setSnapshotData] = useState({
-    careerStage: 'Professional',
-    longTermGoal: 'Become a lead animator',
-    currentRole: 'Animator',
-    company: 'Disney',
-    joinDate: 'Jul 2025'
+    careerStage: '',
+    longTermGoal: '',
+    currentRole: '',
+    company: '',
+    joinDate: ''
   });
 
   const [analytics, setAnalytics] = useState({
-    profileCompletion: 85,
-    skillScore: 847,
-    connections: 89,
-    applications: 12,
-    jobMatches: 24,
+    profileCompletion: 0,
+    skillScore: 0,
+    connections: 0,
+    applications: 0,
+    jobMatches: 0,
     chartData: [
-        { name: 'Views', value: 127 },
-        { name: 'Connects', value: 89 },
-        { name: 'Applies', value: 12 },
-        { name: 'Matches', value: 24 },
+        { name: 'Views', value: 0 },
+        { name: 'Connects', value: 0 },
+        { name: 'Applies', value: 0 },
+        { name: 'Matches', value: 0 },
     ]
   });
 
-  const [careerGoals, setCareerGoals] = useState([
-    { name: 'Portfolio', progress: 75 },
-    { name: 'Networking', progress: 60 },
-    { name: 'Skills', progress: 90 },
-    { name: 'Experience', progress: 45 },
-  ]);
+  const [careerGoals, setCareerGoals] = useState<any[]>([]);
 
-  const jobRecommendations = [
-    { id: 1, title: 'Senior 3D Animator', company: 'Pixar', location: 'Emeryville, CA', match: 92 },
-    { id: 2, title: 'Character Animator', company: 'DreamWorks', location: 'Glendale, CA', match: 88 },
-    { id: 3, title: 'VFX Animator', company: 'Industrial Light & Magic', location: 'San Francisco, CA', match: 85 },
-    { id: 4, title: 'Game Animator', company: 'Riot Games', location: 'Los Angeles, CA', match: 82 },
-  ];
+  const jobRecommendations: any[] = [];
 
   // --- HANDLERS ---
   const showToast = (message: string) => setToast({ id: Date.now(), message });
@@ -1124,17 +1105,22 @@ const ProfilePageDashboard: FC<ProfilePageDashboardProps> = ({
           <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
             <MotionCard delay={1}>
               <CardHeader className="flex-row items-center justify-between pb-2"><CardTitle className="text-sm font-medium">Career Stage</CardTitle><Briefcase className="h-4 w-4 text-zinc-500"/></CardHeader>
-              <CardContent><div className="text-2xl font-bold">{snapshotData.careerStage}</div></CardContent>
+              <CardContent><div className="text-2xl font-bold">{snapshotData.careerStage || "Not set"}</div></CardContent>
             </MotionCard>
             <MotionCard delay={2}>
               <CardHeader className="flex-row items-center justify-between pb-2"><CardTitle className="text-sm font-medium">Long-term Goal</CardTitle><Target className="h-4 w-4 text-zinc-500"/></CardHeader>
-              <CardContent><div className="text-2xl font-bold">{snapshotData.longTermGoal}</div></CardContent>
+              <CardContent><div className="text-2xl font-bold">{snapshotData.longTermGoal || "Not set"}</div></CardContent>
             </MotionCard>
             <MotionCard delay={3}>
               <CardHeader className="flex-row items-center justify-between pb-2"><CardTitle className="text-sm font-medium">Current Role</CardTitle><Building className="h-4 w-4 text-zinc-500"/></CardHeader>
               <CardContent>
-                  <div className="text-2xl font-bold">{snapshotData.currentRole} at {snapshotData.company}</div>
-                  <p className="text-xs text-zinc-500">Since {snapshotData.joinDate}</p>
+                  <div className="text-2xl font-bold">
+                    {snapshotData.currentRole || "Not set"}
+                    {snapshotData.company ? ` at ${snapshotData.company}` : ""}
+                  </div>
+                  <p className="text-xs text-zinc-500">
+                    {snapshotData.joinDate ? `Since ${snapshotData.joinDate}` : "Add your current role details"}
+                  </p>
               </CardContent>
             </MotionCard>
           </div>
@@ -1172,37 +1158,44 @@ const ProfilePageDashboard: FC<ProfilePageDashboardProps> = ({
                     </div>
                 </CardHeader>
                 <CardContent>
-                    <div className="relative pl-6">
-                        <div className="absolute left-[34px] top-4 h-[calc(100%-2rem)] w-0.5 bg-zinc-200 dark:bg-zinc-800 -translate-x-1/2"></div>
-                        {sortedTimelineItems.map((item) => (
-                          <div key={item.id} className="flex items-start gap-4 mb-6 last:mb-0">
-                            <div className="w-8 h-8 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-full flex items-center justify-center flex-shrink-0 z-10">
-                              {getTimelineIcon(item.type)}
-                            </div>
-                            <div className="flex-1 flex justify-between gap-4">
-                             <div>
-                                <h3 className="font-semibold">
-                                  {item.title}{" "}
-                                  <span className="text-zinc-500 font-normal">
-                                    - {item.subtitle}
-                                  </span>
-                                </h3>
-                                <p className="text-sm text-zinc-500">
-                                  {item.description}
-                                </p>
-                                {(item.startDate || item.endDate || item.isCurrent) && (
-                                  <p className="text-xs text-zinc-500 mt-1">
-                                    {item.startDate
-                                      ? format(item.startDate, "MMM yyyy")
-                                      : "N/A"}{" "}
-                                    -{" "}
-                                    {item.isCurrent
-                                      ? "Present"
-                                      : item.endDate
-                                      ? format(item.endDate, "MMM yyyy")
-                                      : "N/A"}
-                                  </p>
-                                )}
+                    {sortedTimelineItems.length === 0 ? (
+                      <div className="text-sm text-zinc-500">
+                        No timeline entries yet. Add education, work, or projects to tell your story.
+                      </div>
+                    ) : (
+                      <div className="relative pl-6">
+                          <div className="absolute left-[34px] top-4 h-[calc(100%-2rem)] w-0.5 bg-zinc-200 dark:bg-zinc-800 -translate-x-1/2"></div>
+                          {sortedTimelineItems.map((item) => (
+                            <div key={item.id} className="flex items-start gap-4 mb-6 last:mb-0">
+                              <div className="w-8 h-8 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-full flex items-center justify-center flex-shrink-0 z-10">
+                                {getTimelineIcon(item.type)}
+                              </div>
+                              <div className="flex-1 flex justify-between gap-4">
+                               <div>
+                                  <h3 className="font-semibold">
+                                    {item.title}{" "}
+                                    <span className="text-zinc-500 font-normal">
+                                      {item.subtitle ? `- ${item.subtitle}` : ""}
+                                    </span>
+                                  </h3>
+                                  {item.description && (
+                                    <p className="text-sm text-zinc-500">
+                                      {item.description}
+                                    </p>
+                                  )}
+                                  {(item.startDate || item.endDate || item.isCurrent) && (
+                                    <p className="text-xs text-zinc-500 mt-1">
+                                      {item.startDate
+                                        ? format(item.startDate, "MMM yyyy")
+                                        : "N/A"}{" "}
+                                      -{" "}
+                                      {item.isCurrent
+                                        ? "Present"
+                                        : item.endDate
+                                        ? format(item.endDate, "MMM yyyy")
+                                        : "N/A"}
+                                    </p>
+                                  )}
                             </div>
                             <Button
                               variant="ghost"
@@ -1218,7 +1211,8 @@ const ProfilePageDashboard: FC<ProfilePageDashboardProps> = ({
                            </div>
                           </div>
                        ))}
-                    </div>
+                      </div>
+                    )}
                 </CardContent>
             </MotionCard>
             
@@ -1258,13 +1252,13 @@ const ProfilePageDashboard: FC<ProfilePageDashboardProps> = ({
                   <CardHeader><CardTitle>Career Snapshot</CardTitle></CardHeader>
                   <CardContent className="space-y-4">
                       <div>
-                          <div className="flex justify-between mb-1"><p className="text-sm font-medium">Profile Completion</p><p className="text-sm font-medium">{analytics.profileCompletion}%</p></div>
-                          <Progress value={analytics.profileCompletion}/>
+                          <div className="flex justify-between mb-1"><p className="text-sm font-medium">Profile Completion</p><p className="text-sm font-medium">{analytics.profileCompletion || 0}%</p></div>
+                          <Progress value={analytics.profileCompletion || 0}/>
                       </div>
                       <div className="p-4 text-center bg-zinc-100 dark:bg-zinc-900 rounded-lg">
                           <p className="text-sm text-zinc-500">Skill Score</p>
-                          <p className="text-4xl font-bold">{analytics.skillScore}</p>
-                          <Badge>Above Average</Badge>
+                          <p className="text-4xl font-bold">{analytics.skillScore || 0}</p>
+                          <Badge>{analytics.skillScore ? "Above Average" : "No data yet"}</Badge>
                       </div>
                       <EngagementChart data={analytics.chartData}/>
                   </CardContent>
@@ -1274,14 +1268,20 @@ const ProfilePageDashboard: FC<ProfilePageDashboardProps> = ({
               <MotionCard delay={8}>
                   <CardHeader><CardTitle>Skills</CardTitle></CardHeader>
                   <CardContent>
-                      <div className="flex flex-wrap gap-2 mb-4">
-                          {skills.map(skill => (
-                              <Badge key={skill.id} variant="secondary" className="group pr-1">
-                                  {skill.name}
-                                  <button onClick={() => handleDeleteSkill(skill.id)} className="ml-1 opacity-0 group-hover:opacity-100"><X className="h-3 w-3"/></button>
-                              </Badge>
-                          ))}
-                      </div>
+                      {skills.length === 0 ? (
+                        <div className="text-sm text-zinc-500 mb-4">
+                          No skills added yet. Add skills so mentors can see your strengths.
+                        </div>
+                      ) : (
+                        <div className="flex flex-wrap gap-2 mb-4">
+                            {skills.map(skill => (
+                                <Badge key={skill.id} variant="secondary" className="group pr-1">
+                                    {skill.name}
+                                    <button onClick={() => handleDeleteSkill(skill.id)} className="ml-1 opacity-0 group-hover:opacity-100"><X className="h-3 w-3"/></button>
+                                </Badge>
+                            ))}
+                        </div>
+                      )}
                       <div className="flex gap-2">
                          <Input placeholder="Add a new skill..." value={newSkill} onChange={e => setNewSkill(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAddSkill()}/>
                          <Button onClick={handleAddSkill} size="sm">Add</Button>
@@ -1293,42 +1293,48 @@ const ProfilePageDashboard: FC<ProfilePageDashboardProps> = ({
               <MotionCard delay={9}>
                   <CardHeader><CardTitle>Career Goals Tracker</CardTitle></CardHeader>
                   <CardContent className="space-y-4">
-                      {careerGoals.map(goal => (
+                      {careerGoals.length === 0 ? (
+                        <p className="text-sm text-zinc-500">No goals added yet.</p>
+                      ) : (
+                        careerGoals.map(goal => (
                           <div key={goal.name}>
                              <div className="flex justify-between mb-1"><p className="text-sm font-medium">{goal.name}</p><p className="text-sm font-medium">{goal.progress}%</p></div>
                              <Progress value={goal.progress}/>
                           </div>
-                      ))}
+                        ))
+                      )}
                   </CardContent>
               </MotionCard>
           </div>
         </div>
 
         {/* --- JOB RECOMMENDATIONS --- */}
-        <section className="mt-8">
-            <MotionCard delay={10}>
-                <CardHeader><CardTitle>Job Recommendations For You</CardTitle></CardHeader>
-                <CardContent>
-                    <div className="flex space-x-4 overflow-x-auto pb-4 -mb-4 -mx-2 px-2 snap-x snap-mandatory">
-                        {jobRecommendations.map(job => (
-                            <Card key={job.id} className="min-w-[280px] snap-start flex-shrink-0">
-                                <CardHeader>
-                                    <CardTitle className="text-lg">{job.title}</CardTitle>
-                                    <CardDescription>{job.company} - {job.location}</CardDescription>
-                                </CardHeader>
-                                <CardContent className="flex justify-between items-end">
-                                    <div>
-                                        <p className="text-xs text-zinc-500">Match Score</p>
-                                        <p className="text-xl font-bold text-zinc-900 dark:text-zinc-100">{job.match}%</p>
-                                    </div>
-                                    <Button size="sm">Apply Now</Button>
-                                </CardContent>
-                            </Card>
-                        ))}
-                    </div>
-                </CardContent>
-            </MotionCard>
-        </section>
+        {jobRecommendations.length > 0 && (
+          <section className="mt-8">
+              <MotionCard delay={10}>
+                  <CardHeader><CardTitle>Job Recommendations For You</CardTitle></CardHeader>
+                  <CardContent>
+                      <div className="flex space-x-4 overflow-x-auto pb-4 -mb-4 -mx-2 px-2 snap-x snap-mandatory">
+                          {jobRecommendations.map(job => (
+                              <Card key={job.id} className="min-w-[280px] snap-start flex-shrink-0">
+                                  <CardHeader>
+                                      <CardTitle className="text-lg">{job.title}</CardTitle>
+                                      <CardDescription>{job.company} - {job.location}</CardDescription>
+                                  </CardHeader>
+                                  <CardContent className="flex justify-between items-end">
+                                      <div>
+                                          <p className="text-xs text-zinc-500">Match Score</p>
+                                          <p className="text-xl font-bold text-zinc-900 dark:text-zinc-100">{job.match}%</p>
+                                      </div>
+                                      <Button size="sm">Apply Now</Button>
+                                  </CardContent>
+                              </Card>
+                          ))}
+                      </div>
+                  </CardContent>
+              </MotionCard>
+          </section>
+        )}
         
         {/* --- REVIEW & SAVE --- */}
         <motion.section 

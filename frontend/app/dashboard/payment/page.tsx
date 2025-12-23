@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useCallback, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useAuth, useUser } from "@clerk/nextjs";
+import { useSearchParams, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -31,11 +32,15 @@ function loadRazorpayScript(): Promise<boolean> {
 }
 
 const PaymentPage: React.FC = () => {
+  const { getToken } = useAuth();
+  const { user } = useUser();
   const searchParams = useSearchParams();
+  const router = useRouter();
+  
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
 
-  // LOGIC FIX: Ensure we extract these exactly as they are passed in the URL
+  // Extract Mentor details from URL
   const name = searchParams.get("name") ?? "Mentor";
   const role = searchParams.get("role") ?? "";
   const company = searchParams.get("company") ?? "";
@@ -47,34 +52,27 @@ const PaymentPage: React.FC = () => {
 
     const loaded = await loadRazorpayScript();
     if (!loaded || typeof window.Razorpay === "undefined") {
-      setStatusMessage(
-        "Unable to load Razorpay. Please check your network and try again."
-      );
+      setStatusMessage("Unable to load Razorpay. Please check your network.");
       setIsProcessing(false);
       return;
     }
 
     try {
+      // 1. Create Order
       const orderRes = await fetch("/api/razorpay/order", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           amount: price * 100,
           currency: "INR",
-          notes: {
-            mentor: name,
-            role,
-            company,
-          },
+          notes: { mentor: name, role, company },
         }),
       });
 
-      if (!orderRes.ok) {
-        throw new Error("Failed to create payment order");
-      }
-
+      if (!orderRes.ok) throw new Error("Failed to create payment order");
       const order = await orderRes.json();
 
+      // 2. Razorpay Options
       const options = {
         key: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID,
         amount: order.amount,
@@ -84,43 +82,56 @@ const PaymentPage: React.FC = () => {
         order_id: order.id,
         handler: async function (response: any) {
           try {
-            const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || "";
-            const studentId = searchParams.get("studentId") || `student_${Date.now()}`;
-            const studentName = searchParams.get("studentName") || "Student";
-            const studentEmail = searchParams.get("studentEmail") || "";
+            const token = await getToken?.();
+            
+            // Collect data safely
+            const payload = {
+              mentorId: searchParams.get("mentorId"),
+              studentId: user?.id || searchParams.get("studentId"),
+              studentName: user?.fullName || "Student",
+              studentEmail: user?.primaryEmailAddress?.emailAddress || "",
+              title: searchParams.get("title") || `Session with ${name}`,
+              description: searchParams.get("description") || "Mentorship Session",
+              startTime: searchParams.get("selectedStartTime"),
+              endTime: searchParams.get("selectedEndTime"),
+              amount: price,
+              paymentId: response.razorpay_payment_id,
+              orderId: response.razorpay_order_id,
+              razorpaySignature: response.razorpay_signature,
+              mentorEmail: searchParams.get("mentorEmail"),
+              mentorName: name,
+            };
 
-            const confirmRes = await fetch(`${apiBase}/api/mentor-sessions/confirm-payment`, {
+            // 3. Confirm Payment & Create Session
+            const confirmRes = await fetch(`/api/mentor-sessions/confirm-payment`, {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                mentorId: searchParams.get("mentorId") || "",
-                studentId: studentId,
-                studentName: studentName,
-                studentEmail: studentEmail,
-                title: searchParams.get("title") || `Session with ${name}`,
-                description: searchParams.get("description") || "",
-                startTime: searchParams.get("selectedStartTime") || "",
-                endTime: searchParams.get("selectedEndTime") || "",
-                amount: price,
-                paymentId: response.razorpay_payment_id,
-                mentorEmail: searchParams.get("mentorEmail") || "",
-                mentorName: name,
-              }),
+              headers: {
+                "Content-Type": "application/json",
+                ...(token && { Authorization: `Bearer ${token}` }),
+                "x-active-role": "student",
+              },
+              body: JSON.stringify(payload),
             });
 
             if (confirmRes.ok) {
               setStatusMessage("Payment successful! Session confirmed.");
               setTimeout(() => {
-                window.location.href = "/dashboard/student/sessions?tab=upcoming";
+                router.push("/dashboard/student/sessions?tab=upcoming");
               }, 2000);
             } else {
-              setStatusMessage("Payment successful, but session confirmation failed.");
+              const errorData = await confirmRes.json();
+              console.error("Backend Error Details:", errorData);
+              setStatusMessage(`Confirmation failed: ${errorData.error || "Internal Server Error"}`);
             }
           } catch (err) {
-            setStatusMessage("Payment successful, but confirmation error occurred.");
+            console.error("Confirmation Crash:", err);
+            setStatusMessage("Payment successful, but a technical error occurred during confirmation.");
           }
         },
-        prefill: { name },
+        prefill: {
+          name: user?.fullName || name,
+          email: user?.primaryEmailAddress?.emailAddress || "",
+        },
         theme: { color: "#020617" },
       };
 
@@ -131,23 +142,19 @@ const PaymentPage: React.FC = () => {
     } finally {
       setIsProcessing(false);
     }
-  }, [name, role, company, price, searchParams]);
+  }, [name, role, company, price, searchParams, user, getToken, router]);
 
   return (
     <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 flex items-center justify-center px-4">
       <div className="w-full max-w-lg">
         <Card className="border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950">
           <CardHeader>
-            <CardTitle className="text-lg font-semibold">
-              Review &amp; Pay
-            </CardTitle>
+            <CardTitle className="text-lg font-semibold">Review & Pay</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <div>
               <p className="text-sm text-zinc-500">Mentor</p>
-              <p className="font-medium text-zinc-900 dark:text-zinc-50">
-                {name}
-              </p>
+              <p className="font-medium text-zinc-900 dark:text-zinc-50">{name}</p>
               <p className="text-sm text-zinc-600 dark:text-zinc-300">
                 {role} {company ? `@ ${company}` : ""}
               </p>
@@ -157,14 +164,12 @@ const PaymentPage: React.FC = () => {
               <p className="text-sm text-zinc-500">Session price</p>
               <p className="font-mono text-lg font-semibold text-zinc-900 dark:text-zinc-50">
                 ₹{price.toLocaleString("en-IN")}{" "}
-                <span className="text-xs font-normal text-zinc-500">
-                  / session
-                </span>
+                <span className="text-xs font-normal text-zinc-500">/ session</span>
               </p>
             </div>
 
             <Button
-              className="w-full bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 hover:bg-zinc-800 dark:hover:bg-zinc-200"
+              className="w-full bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900"
               onClick={handlePay}
               disabled={isProcessing || price <= 0}
             >
@@ -172,7 +177,7 @@ const PaymentPage: React.FC = () => {
             </Button>
 
             {statusMessage && (
-              <Alert className="mt-3">
+              <Alert className="mt-3" variant={statusMessage.includes("successful") ? "default" : "destructive"}>
                 <AlertDescription>{statusMessage}</AlertDescription>
               </Alert>
             )}

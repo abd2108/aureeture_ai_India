@@ -7,14 +7,21 @@ export async function POST(req: NextRequest) {
     const currency = body.currency || "INR";
     const notes = body.notes || {};
 
-    const keyId = process.env.RAZORPAY_KEY_ID;
-    const keySecret = process.env.RAZORPAY_KEY_SECRET;
+    // Resolve keys from server env first, fall back to public env only if set
+    const keyId =
+      process.env.RAZORPAY_KEY_ID ||
+      process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID ||
+      "";
+    const keySecret =
+      process.env.RAZORPAY_KEY_SECRET ||
+      process.env.NEXT_PUBLIC_RAZORPAY_KEY_SECRET ||
+      "";
 
     if (!keyId || !keySecret) {
       return NextResponse.json(
         {
           error:
-            "Razorpay keys are not configured. Set RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET in .env.local.",
+            "Razorpay keys are not configured. Set RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET in the server environment.",
         },
         { status: 500 }
       );
@@ -40,7 +47,11 @@ export async function POST(req: NextRequest) {
     if (!res.ok) {
       // Pass through Razorpay error details to help debug
       return NextResponse.json(
-        { error: "Failed to create Razorpay order", details: text },
+        {
+          error: "Failed to create Razorpay order",
+          details: text || res.statusText,
+          status: res.status,
+        },
         { status: res.status }
       );
     }

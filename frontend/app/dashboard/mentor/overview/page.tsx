@@ -28,8 +28,6 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
 
-const ONBOARDING_KEY = "aureeture_mentor_onboarding_complete";
-
 // --- Types ---
 
 type SessionStatus = "scheduled" | "ongoing" | "completed" | "cancelled";
@@ -208,16 +206,6 @@ const MentorOverviewPage: React.FC = () => {
     () => isLoaded && isSignedIn && !!user?.id,
     [isLoaded, isSignedIn, user?.id]
   );
-
-  // Gate: if onboarding not complete, push back to onboarding wizard
-  useEffect(() => {
-    const hasCompletedOnboarding =
-      typeof window !== "undefined" &&
-      window.localStorage.getItem(ONBOARDING_KEY) === "true";
-    if (!hasCompletedOnboarding) {
-      router.replace("/dashboard/mentor/onboarding");
-    }
-  }, [router]);
 
   // Load dashboard stats
   useEffect(() => {
@@ -527,7 +515,7 @@ setTodaySessions(deduped.slice(0, 5));
                 todaySessions.map((s) => (
                   <SessionRow
                     key={s._id}
-                    name={"abdullah"}
+                    name={s.studentName}
                     topic={s.title}
                     time={new Date(s.startTime).toLocaleTimeString(undefined, {
                       hour: "2-digit",

@@ -2,7 +2,8 @@
 
 import React, { useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { useClerk } from "@clerk/nextjs";
 import { motion } from "framer-motion";
 import {
   Bell,
@@ -151,6 +152,8 @@ const getBreadcrumbs = (pathname: string) => {
 
 export default function TopNavbar() {
   const pathname = usePathname() || "/dashboard/student/profile";
+  const router = useRouter();
+  const { signOut } = useClerk();
   const role = getRoleFromPath(pathname);
   const quickActions = getQuickActions(role);
   const breadcrumbs = getBreadcrumbs(pathname);
@@ -163,6 +166,22 @@ export default function TopNavbar() {
     setOpen: setNotificationsOpen,
   } = useNotificationModal();
   const [isNavOpen, setNavOpen] = useState(false);
+
+  const handleLogout = async () => {
+    try {
+      await signOut();
+      router.push("/");
+      // Force reload if navigation doesn't happen
+      setTimeout(() => {
+        if (window.location.pathname !== "/") {
+          window.location.href = "/";
+        }
+      }, 1000);
+    } catch (err) {
+      console.error("Logout failed:", err);
+      window.location.href = "/";
+    }
+  };
 
   return (
     <motion.header
@@ -258,6 +277,7 @@ export default function TopNavbar() {
                 <Button
                   variant="outline"
                   size="icon"
+                  onClick={handleLogout}
                   className="h-8 w-8 rounded-full border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
                   aria-label="Log out"
                 >
@@ -372,11 +392,19 @@ export default function TopNavbar() {
               </div>
               <DropdownMenuSeparator />
               <DropdownMenuItem asChild>
-                <Link href="/dashboard/student/profile">Profile & Settings</Link>
+                <Link href={`/dashboard/${role === 'founder' ? 'founder/settings' : (role + '/profile')}`}>
+                  Profile & Settings
+                </Link>
               </DropdownMenuItem>
               <DropdownMenuItem>Billing</DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem className="text-red-600 dark:text-red-400">
+              <DropdownMenuItem 
+                onSelect={(e) => {
+                  e.preventDefault();
+                  handleLogout();
+                }}
+                className="text-red-600 dark:text-red-400 cursor-pointer"
+              >
                 Log out
               </DropdownMenuItem>
             </DropdownMenuContent>

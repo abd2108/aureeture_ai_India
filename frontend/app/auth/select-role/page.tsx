@@ -2,6 +2,8 @@
 
 import React from "react";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 
@@ -27,6 +29,26 @@ const roles = [
 ];
 
 export default function SelectRolePage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const redirect = searchParams.get("redirect");
+
+  useEffect(() => {
+    // Clear any stale role when landing on this page
+    if (typeof window !== "undefined") {
+      window.sessionStorage.removeItem("aureeture_active_role");
+    }
+  }, []);
+
+  const handleSelect = (roleId: string, href: string) => {
+    if (typeof window !== "undefined") {
+      window.sessionStorage.setItem("aureeture_active_role", roleId);
+      window.localStorage.setItem("aureeture_active_role", roleId);
+    }
+    const target = redirect || href;
+    router.replace(target);
+  };
+
   return (
     <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 flex items-center justify-center px-4">
       <div className="w-full max-w-4xl space-y-8">
@@ -55,8 +77,12 @@ export default function SelectRolePage() {
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <Button asChild className="w-full rounded-full">
-                  <Link href={role.href}>Continue as {role.title}</Link>
+                <Button
+                  className="w-full rounded-full"
+                  type="button"
+                  onClick={() => handleSelect(role.id, role.href)}
+                >
+                  Continue as {role.title}
                 </Button>
               </CardContent>
             </Card>

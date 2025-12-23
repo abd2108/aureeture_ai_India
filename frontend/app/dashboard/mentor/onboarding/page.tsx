@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useAuth, useClerk } from "@clerk/nextjs";
 import {
   ArrowLeft,
   ArrowRight,
@@ -14,6 +15,7 @@ import {
   Star,
   Tag,
   User,
+  LogOut,
 } from "lucide-react";
 
 import {
@@ -64,6 +66,7 @@ function createEmptyProfile(): MentorProfile {
     name: "",
     currentRole: "",
     company: "",
+    location: "",
     linkedinUrl: "",
     resumeUrl: "",
     totalExperienceYears: null,
@@ -80,16 +83,38 @@ function createEmptyProfile(): MentorProfile {
     overrideAvailability: [],
     isVerified: false,
     isOnline: true,
+    bio: "",
+    mentoringFocus: "",
+    idealMentee: "",
+    languages: "",
+    minNoticeHours: null,
+    maxSessionsPerWeek: null,
+    preSessionNotesRequired: false,
+    allowRecording: false,
+    avatarUrl: "",
+    isOnboarded: false,
   };
 }
 
 export default function MentorOnboardingPage() {
   const router = useRouter();
+  const { getToken } = useAuth();
+  const { signOut } = useClerk();
   const [step, setStep] = useState<StepId>("BASIC");
   const [profile, setProfile] = useState<MentorProfile>(createEmptyProfile);
   const [resumeFileName, setResumeFileName] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || "";
+
+  const handleLogout = async () => {
+    try {
+      await signOut();
+      router.push("/");
+    } catch (err) {
+      console.error("Logout failed:", err);
+      window.location.href = "/";
+    }
+  };
 
   const currentStepIndex = STEP_ORDER.indexOf(step);
   const isLastStep = currentStepIndex === STEP_ORDER.length - 1;
@@ -121,10 +146,12 @@ export default function MentorOnboardingPage() {
   const handleComplete = async () => {
     setIsSaving(true);
     try {
+      const token = await getToken();
       const payload = {
         name: profile.name,
         currentRole: profile.currentRole,
         company: profile.company,
+        location: profile.location,
         linkedinUrl: profile.linkedinUrl,
         resumeUrl: profile.resumeUrl,
         totalExperienceYears: profile.totalExperienceYears,
@@ -137,12 +164,24 @@ export default function MentorOnboardingPage() {
         overrideAvailability: profile.overrideAvailability,
         isVerified: profile.isVerified,
         isOnline: profile.isOnline,
+        bio: profile.bio,
+        mentoringFocus: profile.mentoringFocus,
+        idealMentee: profile.idealMentee,
+        languages: profile.languages,
+        minNoticeHours: profile.minNoticeHours,
+        maxSessionsPerWeek: profile.maxSessionsPerWeek,
+        preSessionNotesRequired: profile.preSessionNotesRequired,
+        allowRecording: profile.allowRecording,
+        avatarUrl: profile.avatarUrl,
       };
 
       const url = apiBase ? `${apiBase}/api/role-onboarding/mentor` : `/api/role-onboarding/mentor`;
       const res = await fetch(url, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         credentials: "include",
         body: JSON.stringify(payload),
       });
@@ -182,16 +221,27 @@ export default function MentorOnboardingPage() {
             </p>
           </div>
 
-          <div className="flex items-center gap-3 rounded-xl border border-zinc-200 bg-white px-3 py-2 text-xs dark:border-zinc-800 dark:bg-zinc-900">
-            <div className="flex flex-col">
-              <span className="font-medium text-zinc-900 dark:text-zinc-50">
-                Step {currentStepIndex + 1} of {STEP_ORDER.length}
-              </span>
-              <span className="text-[11px] text-zinc-500">
-                {StepLabel[step]}
-              </span>
+          <div className="flex items-center gap-3">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleLogout}
+              className="hidden md:flex gap-2 rounded-full border-zinc-200 dark:border-zinc-800"
+            >
+              <LogOut className="h-4 w-4" />
+              Log out
+            </Button>
+            <div className="flex items-center gap-3 rounded-xl border border-zinc-200 bg-white px-3 py-2 text-xs dark:border-zinc-800 dark:bg-zinc-900">
+              <div className="flex flex-col">
+                <span className="font-medium text-zinc-900 dark:text-zinc-50">
+                  Step {currentStepIndex + 1} of {STEP_ORDER.length}
+                </span>
+                <span className="text-[11px] text-zinc-500">
+                  {StepLabel[step]}
+                </span>
+              </div>
+              <CheckCircle2 className="h-5 w-5 text-emerald-500" />
             </div>
-            <CheckCircle2 className="h-5 w-5 text-emerald-500" />
           </div>
         </header>
 
@@ -273,6 +323,18 @@ export default function MentorOnboardingPage() {
                       placeholder="e.g. Google, Early-stage startup"
                     />
                   </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-zinc-600 dark:text-zinc-300">
+                    Location (city, country)
+                  </label>
+                  <Input
+                    value={profile.location}
+                    onChange={(e) =>
+                      setProfile((p) => ({ ...p, location: e.target.value }))
+                    }
+                    placeholder="e.g. Bengaluru, India"
+                  />
+                </div>
                   <div className="space-y-1">
                     <label className="flex items-center gap-1 text-xs font-medium text-zinc-600 dark:text-zinc-300">
                       <Linkedin className="h-3 w-3" />
@@ -427,6 +489,10 @@ export default function MentorOnboardingPage() {
                   <Textarea
                     rows={3}
                     placeholder="Optional: add any additional context about your experience, industries, or tools you focus on."
+                    value={profile.bio}
+                    onChange={(e) =>
+                      setProfile((p) => ({ ...p, bio: e.target.value }))
+                    }
                   />
                 </div>
               </CardContent>

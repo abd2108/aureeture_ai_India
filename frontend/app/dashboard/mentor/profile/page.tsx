@@ -1,6 +1,7 @@
  "use client";
 
 import React, { useState, useEffect, useRef } from "react";
+import { useAuth } from "@clerk/nextjs";
 import {
   User,
   Briefcase,
@@ -95,40 +96,41 @@ const TIMEZONES = [
   { value: "UTC", label: "UTC" },
 ];
 
+const DEFAULT_SCHEDULE: ScheduleSlot[] = [
+  { day: "Sunday", active: false, start: "09:00", end: "17:00" },
+  { day: "Monday", active: false, start: "09:00", end: "17:00" },
+  { day: "Tuesday", active: false, start: "09:00", end: "17:00" },
+  { day: "Wednesday", active: false, start: "09:00", end: "17:00" },
+  { day: "Thursday", active: false, start: "09:00", end: "17:00" },
+  { day: "Friday", active: false, start: "09:00", end: "17:00" },
+  { day: "Saturday", active: false, start: "09:00", end: "17:00" },
+];
+
 const DEFAULT_DATA: MentorProfile = {
   isOnline: true,
-  fullName: "Sangam Kumar",
-  role: "Senior Product Manager",
-  company: "Nexerve IT",
-  location: "Bengaluru, India",
-  linkedin: "https://linkedin.com/in/sangam-kumar",
+  fullName: "",
+  role: "",
+  company: "",
+  location: "",
+  linkedin: "",
   avatarUrl: "",
-  resumeName: "sangam_cv_2025.pdf",
-  experienceYears: 5,
-  degree: "B.Tech in Computer Science",
-  college: "IIT Bombay",
-  bio: "Passionate about building scalable products and helping students crack PM interviews.",
-  tags: ["Product Strategy", "System Design", "Mock Interviews"],
-  hourlyRate: 2500,
-  halfHourRate: 1500,
+  resumeName: "",
+  experienceYears: "",
+  degree: "",
+  college: "",
+  bio: "",
+  tags: [],
+  hourlyRate: "",
+  halfHourRate: "",
   timezone: "Asia/Kolkata",
   instantBooking: true,
-  schedule: [
-    { day: "Sunday", active: false, start: "09:00", end: "17:00" },
-    { day: "Monday", active: true, start: "10:00", end: "19:00" },
-    { day: "Tuesday", active: true, start: "10:00", end: "19:00" },
-    { day: "Wednesday", active: true, start: "10:00", end: "19:00" },
-    { day: "Thursday", active: true, start: "10:00", end: "19:00" },
-    { day: "Friday", active: true, start: "10:00", end: "18:00" },
-    { day: "Saturday", active: true, start: "11:00", end: "16:00" },
-  ],
-  mentoringFocus:
-    "Product management, interview prep, and roadmap strategy for early‑stage PMs and founders.",
-  idealMentee: "Early‑career (0–3 years experience)",
-  languages: "English",
-  minNoticeHours: 12,
-  maxSessionsPerWeek: 8,
-  preSessionNotesRequired: true,
+  schedule: DEFAULT_SCHEDULE,
+  mentoringFocus: "",
+  idealMentee: "",
+  languages: "",
+  minNoticeHours: "",
+  maxSessionsPerWeek: "",
+  preSessionNotesRequired: false,
   allowRecording: false,
 };
 
@@ -533,15 +535,95 @@ export default function MentorProfilePage() {
   const [loading, setLoading] = useState(true);
   const [formData, setFormData] = useState<MentorProfile>(DEFAULT_DATA);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
+  const { getToken } = useAuth();
+  const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || "";
 
-  // Simulate Initial Data Fetch
+  const hydrateFromApi = (mentor: any): MentorProfile => {
+    const scheduleFromApi: ScheduleSlot[] = DEFAULT_SCHEDULE.map((slot) => {
+      const match =
+        mentor?.weeklyAvailability?.find(
+          (w: any) => (w.day || "").toLowerCase() === slot.day.toLowerCase()
+        ) || null;
+      if (match) {
+        return {
+          ...slot,
+          active: true,
+          start: match.startTime || slot.start,
+          end: match.endTime || slot.end,
+        };
+      }
+      return slot;
+    });
+
+    return {
+      isOnline: mentor?.isOnline ?? true,
+      fullName: mentor?.name || "",
+      role: mentor?.currentRole || "",
+      company: mentor?.company || "",
+      location: mentor?.location || "",
+      linkedin: mentor?.linkedinUrl || "",
+      avatarUrl: mentor?.avatarUrl || "",
+      resumeName: mentor?.resumeUrl || "",
+      experienceYears:
+        typeof mentor?.totalExperienceYears === "number"
+          ? mentor.totalExperienceYears
+          : mentor?.totalExperienceYears || "",
+      degree: mentor?.educationDegree || "",
+      college: mentor?.educationCollege || "",
+      bio: mentor?.bio || "",
+      tags: mentor?.specializationTags || [],
+      hourlyRate: mentor?.pricing?.expectedHourlyRate ?? "",
+      halfHourRate: mentor?.pricing?.expectedHalfHourRate ?? "",
+      timezone: mentor?.timezone || "Asia/Kolkata",
+      instantBooking: mentor?.isOnline ?? true,
+      schedule: scheduleFromApi,
+      mentoringFocus: mentor?.mentoringFocus || "",
+      idealMentee: mentor?.idealMentee || "",
+      languages: mentor?.languages || "",
+      minNoticeHours: mentor?.minNoticeHours ?? "",
+      maxSessionsPerWeek: mentor?.maxSessionsPerWeek ?? "",
+      preSessionNotesRequired: mentor?.preSessionNotesRequired ?? false,
+      allowRecording: mentor?.allowRecording ?? false,
+    };
+  };
+
+  // Load Mentor profile from API
   useEffect(() => {
-    const timer = setTimeout(() => {
-      setLoading(false);
-      // In real app, fetch data here
-    }, 800);
-    return () => clearTimeout(timer);
-  }, []);
+    const load = async () => {
+      try {
+        const token = await getToken();
+        const endpoint = apiBase
+          ? `${apiBase}/api/role-onboarding/mentor`
+          : "/api/role-onboarding/mentor";
+
+        const res = await fetch(endpoint, {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          credentials: "include",
+        });
+
+        if (!res.ok) {
+          // If mentor record does not exist yet, fall back to defaults
+          setLoading(false);
+          return;
+        }
+
+        const payload = await res.json();
+        if (payload?.data) {
+          setFormData(hydrateFromApi(payload.data));
+        }
+      } catch (err) {
+        console.error("Failed to load mentor profile", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    load();
+  }, [apiBase, getToken]);
 
   // Handlers
   const handleInputChange = (
@@ -584,11 +666,81 @@ export default function MentorProfilePage() {
 
   const handleSaveChanges = async () => {
     setSaveStatus("saving");
-    // Simulate API call
-    setTimeout(() => {
+    try {
+      const token = await getToken();
+      const endpoint = apiBase
+        ? `${apiBase}/api/role-onboarding/mentor`
+        : "/api/role-onboarding/mentor";
+
+      const weeklyAvailability = formData.schedule
+        .filter((slot) => slot.active)
+        .map((slot) => ({
+          id: `slot-${slot.day.toLowerCase()}`,
+          day: slot.day,
+          startTime: slot.start,
+          endTime: slot.end,
+        }));
+
+      const payload = {
+        name: formData.fullName,
+        currentRole: formData.role,
+        company: formData.company,
+        location: formData.location,
+        linkedinUrl: formData.linkedin,
+        resumeUrl: formData.resumeName,
+        totalExperienceYears: formData.experienceYears
+          ? Number(formData.experienceYears)
+          : null,
+        educationDegree: formData.degree,
+        educationCollege: formData.college,
+        specializationTags: formData.tags,
+        pricing: {
+          expectedHourlyRate: formData.hourlyRate ? Number(formData.hourlyRate) : null,
+          expectedHalfHourRate: formData.halfHourRate ? Number(formData.halfHourRate) : null,
+          currency: "INR",
+        },
+        timezone: formData.timezone,
+        weeklyAvailability,
+        overrideAvailability: [],
+        isVerified: false,
+        isOnline: formData.instantBooking,
+        bio: formData.bio,
+        mentoringFocus: formData.mentoringFocus,
+        idealMentee: formData.idealMentee,
+        languages: formData.languages,
+        minNoticeHours: formData.minNoticeHours
+          ? Number(formData.minNoticeHours)
+          : null,
+        maxSessionsPerWeek: formData.maxSessionsPerWeek
+          ? Number(formData.maxSessionsPerWeek)
+          : null,
+        preSessionNotesRequired: formData.preSessionNotesRequired,
+        allowRecording: formData.allowRecording,
+        avatarUrl: formData.avatarUrl,
+      };
+
+      const res = await fetch(endpoint, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        credentials: "include",
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => null);
+        throw new Error(errBody?.message || "Unable to save mentor profile");
+      }
+
       setSaveStatus("saved");
-      setTimeout(() => setSaveStatus("idle"), 3000);
-    }, 1200);
+      setTimeout(() => setSaveStatus("idle"), 2500);
+    } catch (err: any) {
+      console.error("Failed to save mentor profile", err);
+      alert(err?.message || "Could not save profile. Please try again.");
+      setSaveStatus("idle");
+    }
   };
 
   const handleAvatarChange = (file: File) => {

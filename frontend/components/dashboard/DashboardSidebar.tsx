@@ -3,6 +3,7 @@
 import React, { useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { useClerk } from "@clerk/nextjs";
 import {
   LayoutDashboard,
   User,
@@ -51,6 +52,7 @@ const NAV_CONFIG: Record<Role, NavItem[]> = {
   student: [
     { label: "Profile", href: "/dashboard/student/profile", icon: User },
     { label: "Mentors", href: "/dashboard/student/mentors", icon: Users },
+    { label: "Sessions", href: "/dashboard/student/sessions", icon: Calendar },
     { label: "Path Finder", href: "/dashboard/student/pathfinder", icon: Route },
     {
       label: "Real-time Projects",
@@ -88,9 +90,26 @@ export default function Sidebar() {
   const pathname = usePathname();
   const role = useCurrentRole(pathname || "");
   const router = useRouter();
+  const { signOut } = useClerk();
   const { profile, setProfile } = useProfile();
   const [isProfileSettingsOpen, setProfileSettingsOpen] = useState(false);
   const { open: openNotifications } = useNotificationModal();
+
+  const handleLogout = async () => {
+    try {
+      await signOut();
+      router.push("/");
+      // Force reload if navigation doesn't happen
+      setTimeout(() => {
+        if (window.location.pathname !== "/") {
+          window.location.href = "/";
+        }
+      }, 1000);
+    } catch (err) {
+      console.error("Logout failed:", err);
+      window.location.href = "/";
+    }
+  };
 
   // Memoize nav items to avoid re-calculating on every render
   const navItems = useMemo(() => NAV_CONFIG[role], [role]);
@@ -215,7 +234,13 @@ export default function Sidebar() {
               <span>Notifications</span>
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem className="text-red-600 focus:text-red-600 focus:bg-red-50 dark:text-red-400 dark:focus:bg-red-950/20 cursor-pointer">
+            <DropdownMenuItem 
+              onSelect={(e) => {
+                e.preventDefault();
+                handleLogout();
+              }}
+              className="text-red-600 focus:text-red-600 focus:bg-red-50 dark:text-red-400 dark:focus:bg-red-950/20 cursor-pointer"
+            >
               <LogOut className="mr-2 h-4 w-4" />
               <span>Log out</span>
             </DropdownMenuItem>

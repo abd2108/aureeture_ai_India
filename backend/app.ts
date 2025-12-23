@@ -2,12 +2,12 @@ import express, { Express, Request, Response } from 'express';
 import dotenv from "dotenv";
 dotenv.config(); // This MUST be at the top
 import cors from 'cors';
-import { FRONTEND_URL } from './config';
+import { CLERK_ENABLED, FRONTEND_URL, NODE_ENV } from './config';
 import apiRouter from './routes';
 import { errorHandler } from './middleware/error.middleware';
-import { clerkMiddleware } from "@clerk/express";
 import { syncUserMiddleware } from "./middleware/syncUser.middleware";
 import { roleResolverMiddleware } from "./middleware/roleResolver.middleware";
+import { clerkAuthMiddleware } from "./middleware/auth.middleware";
 const app: Express = express();
 
 // --- Core Middleware ---
@@ -40,9 +40,15 @@ app.use(
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-app.use(clerkMiddleware());
+// In dev, allow a mock auth context so API calls don't 503 when Clerk keys are missing.
+if (!CLERK_ENABLED && NODE_ENV !== "production") {
+  console.warn("[auth] Clerk not configured; using dev auth fallback (x-mock-user-id).");
+}
+
+app.use(clerkAuthMiddleware);
 app.use(syncUserMiddleware);
 app.use(roleResolverMiddleware);
+
 // --- API Routes ---
 app.use('/api', apiRouter);
 

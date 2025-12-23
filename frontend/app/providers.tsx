@@ -6,13 +6,10 @@ import { ThemeProvider } from "@/components/theme-provider";
 import ConditionalNavbar from "@/components/conditional-navbar";
 import ConditionalFooter from "@/components/conditional-footer";
 import SkipToContent from "@/components/skip-to-content";
-
-const publishableKey =
-  process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ||
-  process.env.CLERK_PUBLISHABLE_KEY;
+import { clerkPublishableKey, isClerkConfigured } from "@/lib/clerk";
 
 export default function Providers({ children }: { children: React.ReactNode }) {
-  if (!publishableKey) {
+  if (!isClerkConfigured) {
     if (process.env.NODE_ENV !== "production") {
       // eslint-disable-next-line no-console
       console.warn(
@@ -36,7 +33,7 @@ export default function Providers({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <ClerkProvider publishableKey={publishableKey}>
+    <ClerkProvider publishableKey={clerkPublishableKey}>
       <ThemeProvider
         attribute="class"
         defaultTheme="system"

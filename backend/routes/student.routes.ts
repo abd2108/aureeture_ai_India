@@ -56,6 +56,8 @@ router.post("/student/profile", requireAuth, async (req, res) => {
           location: payload.location,
           availability: payload.availability,
           preferences: payload.preferences,
+          isOnboarded: true,
+          onboardedAt: payload.isOnboarded ? payload.onboardedAt || new Date() : new Date(),
         },
       },
       { upsert: true, new: true }

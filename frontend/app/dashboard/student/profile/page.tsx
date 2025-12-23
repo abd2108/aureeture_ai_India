@@ -468,39 +468,63 @@ const ProfilePageDashboard: FC<ProfilePageDashboardProps> = ({
     try {
       const token = await getToken();
       
+      // Map UI state to Student onboarding payload
       const updatePayload = {
-        personalInfo: {
-          name: profileData.name,
-          email: profileData.email,
-          phone: profileData.phone,
-          location: profileData.location,
-          linkedin: profileData.linkedin,
+        fullName: profileData.name,
+        email: profileData.email,
+        phone: profileData.phone,
+        linkedinUrl: profileData.linkedin,
+        location: {
+          city: profileData.location,
         },
-        careerSnapshot: snapshotData,
-        timelineItems: timelineItems.map(item => ({
-          type: item.type,
-          title: item.title,
-          subtitle: item.subtitle,
-          description: item.description,
-          startDate: item.startDate,
-          endDate: item.endDate,
-          isCurrent: item.isCurrent,
-        })),
-        skills: skills.map(s => s.name),
-        tasks: tasks,
-        careerGoals: careerGoals,
-        analytics: analytics,
+        experiences: timelineItems
+          .filter((item) => item.type === "work")
+          .map((item) => ({
+            company: item.subtitle,
+            role: item.title,
+            description: item.description,
+            startDate: item.startDate,
+            endDate: item.endDate,
+            city: "", // not captured in UI; keep empty
+            country: "",
+          })),
+        educations: timelineItems
+          .filter((item) => item.type === "education")
+          .map((item) => ({
+            school: item.subtitle,
+            degree: item.title,
+            major: item.description,
+            startYear: item.startDate ? String(item.startDate.getFullYear()) : "",
+            endYear: item.endDate ? String(item.endDate.getFullYear()) : "",
+            gpa: "",
+          })),
+        projects: timelineItems
+          .filter((item) => item.type === "project")
+          .map((item) => ({
+            name: item.title,
+            description: item.description,
+            startYear: item.startDate ? String(item.startDate.getFullYear()) : "",
+            endYear: item.endDate ? String(item.endDate.getFullYear()) : "",
+          })),
+        skills: skills.map((s) => s.name),
+        preferences: {
+          domains: [],
+        },
       };
 
-      const res = await fetch(`${apiBase}/api/profile/student`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`,
-        },
-        credentials: "include",
-        body: JSON.stringify(updatePayload),
-      });
+      const res = await fetch(
+        apiBase ? `${apiBase}/api/role-onboarding/student` : "/api/role-onboarding/student",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            "x-active-role": "student",
+          },
+          credentials: "include",
+          body: JSON.stringify(updatePayload),
+        }
+      );
 
       if (!res.ok) {
         const errorData = await res.json().catch(() => null);
@@ -549,23 +573,28 @@ const ProfilePageDashboard: FC<ProfilePageDashboardProps> = ({
     }
 
     // Auto-save to backend
-    if (user?.id && apiBase && getToken) {
+    if (user?.id && getToken) {
       try {
         const token = await getToken();
-        await fetch(`${apiBase}/api/profile/student`, {
-          method: "PUT",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${token}`,
-          },
-          credentials: "include",
-          body: JSON.stringify({
-            personalInfo: {
-              ...profileData,
-              [key]: value,
+        await fetch(
+          apiBase ? `${apiBase}/api/role-onboarding/student` : "/api/role-onboarding/student",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+              "x-active-role": "student",
             },
-          }),
-        });
+            credentials: "include",
+            body: JSON.stringify({
+              fullName: key === "name" ? value : profileData.name,
+              email: key === "email" ? value : profileData.email,
+              phone: key === "phone" ? value : profileData.phone,
+              linkedinUrl: key === "linkedin" ? value : profileData.linkedin,
+              location: { city: key === "location" ? value : profileData.location },
+            }),
+          }
+        );
       } catch (err) {
         console.error("Error auto-saving:", err);
       }
@@ -1131,13 +1160,58 @@ const ProfilePageDashboard: FC<ProfilePageDashboardProps> = ({
             {/* --- PERSONAL INFO --- */}
             <MotionCard delay={4}>
               <CardHeader><CardTitle>Personal Information</CardTitle></CardHeader>
-              <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <EditableField icon={<User size={16}/>} label="Full Name" value={profileData.name} onSave={(v) => handleProfileDataSave('name', v)} />
-                <EditableField icon={<Mail size={16}/>} label="Email" value={profileData.email} onSave={(v) => handleProfileDataSave('email', v)} />
-                <EditableField icon={<Phone size={16}/>} label="Phone" value={profileData.phone} onSave={(v) => handleProfileDataSave('phone', v)} />
-                <EditableField icon={<MapPin size={16}/>} label="Location" value={profileData.location} onSave={(v) => handleProfileDataSave('location', v)} />
-                <div className="md:col-span-2">
-                    <EditableField icon={<Linkedin size={16}/>} label="LinkedIn" value={profileData.linkedin} onSave={(v) => handleProfileDataSave('linkedin', v)} />
+              <CardContent>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <p className="text-xs text-zinc-500">Full Name</p>
+                    <Input
+                      value={profileData.name}
+                      onChange={(e) => setProfileData((prev) => ({ ...prev, name: e.target.value }))}
+                      placeholder="Your full name"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <p className="text-xs text-zinc-500">Email</p>
+                    <Input
+                      value={profileData.email}
+                      onChange={(e) => setProfileData((prev) => ({ ...prev, email: e.target.value }))}
+                      placeholder="you@example.com"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <p className="text-xs text-zinc-500">Phone</p>
+                    <Input
+                      value={profileData.phone}
+                      onChange={(e) => setProfileData((prev) => ({ ...prev, phone: e.target.value }))}
+                      placeholder="+91 99999 99999"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <p className="text-xs text-zinc-500">Location</p>
+                    <Input
+                      value={profileData.location}
+                      onChange={(e) => setProfileData((prev) => ({ ...prev, location: e.target.value }))}
+                      placeholder="City, Country"
+                    />
+                  </div>
+                  <div className="space-y-2 md:col-span-2">
+                    <p className="text-xs text-zinc-500">LinkedIn</p>
+                    <Input
+                      value={profileData.linkedin}
+                      onChange={(e) => setProfileData((prev) => ({ ...prev, linkedin: e.target.value }))}
+                      placeholder="https://linkedin.com/in/you"
+                    />
+                  </div>
+                </div>
+                <div className="flex justify-end mt-4">
+                  <Button
+                    onClick={handleSaveAll}
+                    disabled={saving || isSaving}
+                    className="gap-2"
+                  >
+                    {saving || isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                    Save personal info
+                  </Button>
                 </div>
               </CardContent>
             </MotionCard>

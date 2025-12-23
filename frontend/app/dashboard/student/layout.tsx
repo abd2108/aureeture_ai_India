@@ -2,6 +2,7 @@
 
 import { useAuth, useUser } from "@clerk/nextjs";
 import { useEffect, useMemo, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
 
 export default function StudentDashboardLayout({
   children,
@@ -11,13 +12,15 @@ export default function StudentDashboardLayout({
   const { getToken, isLoaded: isAuthLoaded, isSignedIn } = useAuth();
   const { user, isLoaded: isUserLoaded } = useUser();
   const [ready, setReady] = useState(false);
+  const router = useRouter();
+  const pathname = usePathname();
   const apiBase = useMemo(
     () => process.env.NEXT_PUBLIC_API_BASE_URL || "",
     []
   );
 
   useEffect(() => {
-    const ensureStudentProfile = async () => {
+    const ensureOnboarding = async () => {
       if (!isAuthLoaded || !isUserLoaded) return;
       if (!isSignedIn) {
         setReady(true);
@@ -31,67 +34,38 @@ export default function StudentDashboardLayout({
           "x-active-role": "student",
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         };
-        const profileUrl = apiBase
-          ? `${apiBase}/api/student/profile`
-          : "/api/student/profile";
+        const statusUrl = apiBase
+          ? `${apiBase}/api/role-onboarding/student/status`
+          : "/api/role-onboarding/student/status";
 
-        const res = await fetch(profileUrl, {
+        const res = await fetch(statusUrl, {
           method: "GET",
           headers,
           credentials: "include",
         });
 
-        let data: any = null;
-        if (res.ok) {
-          data = await res.json().catch(() => null);
-        } else if (res.status === 403) {
-          // If 403, it means the Student record definitely doesn't exist yet
-          // because requireRole("student") failed.
-          data = { data: null };
-        }
+        const data = res.ok ? await res.json().catch(() => null) : null;
+        const isOnboarded = !!data?.data?.isOnboarded;
+        const onboardingPath = "/dashboard/student/onboarding";
 
-        const studentExists = data?.data;
-
-        if (!studentExists) {
-          console.log("Student profile not found, creating one...");
-          const createUrl = apiBase
-            ? `${apiBase}/api/role-onboarding/student`
-            : "/api/role-onboarding/student";
-
-          const createRes = await fetch(createUrl, {
-            method: "POST",
-            headers,
-            credentials: "include",
-            body: JSON.stringify({
-              fullName: user?.fullName || user?.username || "Student",
-              email:
-                user?.primaryEmailAddress?.emailAddress ||
-                user?.emailAddresses?.[0]?.emailAddress ||
-                "",
-              phone: "",
-              linkedinUrl: "",
-              links: {},
-              skills: [],
-              preferences: {},
-            }),
-          });
-          
-          if (!createRes.ok) {
-            const errBody = await createRes.json().catch(() => ({}));
-            console.error("Failed to seed student profile:", errBody);
-          } else {
-            console.log("Student profile seeded successfully");
+        if (!isOnboarded) {
+          if (pathname !== onboardingPath) {
+            router.replace(onboardingPath);
+            return;
           }
+        } else if (pathname === onboardingPath) {
+          router.replace("/dashboard/student/overview");
+          return;
         }
       } catch (err) {
-        console.error("Error syncing student profile", err);
+        console.error("Error checking student onboarding status", err);
       } finally {
         setReady(true);
       }
     };
 
-    ensureStudentProfile();
-  }, [apiBase, getToken, isAuthLoaded, isSignedIn, isUserLoaded, user]);
+    ensureOnboarding();
+  }, [apiBase, getToken, isAuthLoaded, isSignedIn, isUserLoaded, pathname, router, user]);
 
   if (!ready) {
     return (

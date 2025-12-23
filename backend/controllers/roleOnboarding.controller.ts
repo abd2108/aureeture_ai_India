@@ -102,6 +102,8 @@ export const upsertStudent = async (req: Request, res: Response, next: NextFunct
           location: p.location,
           availability: p.availability,
           preferences: p.preferences,
+          isOnboarded: true,
+          onboardedAt: new Date(),
         },
         $setOnInsert: { role: "student", userId: user._id },
       },
@@ -109,6 +111,34 @@ export const upsertStudent = async (req: Request, res: Response, next: NextFunct
     );
 
     return res.status(200).json({ success: true, data: student });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const getStudentOnboardingStatus = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const clerkId = (req as any).auth?.userId;
+    if (!clerkId) {
+      return res.status(401).json({ success: false, error: { message: "Unauthorized" } });
+    }
+
+    const user = await findUserByClerk(clerkId);
+    if (!user) {
+      return res.status(404).json({ success: false, error: { message: "User not found" } });
+    }
+
+    const student = await Student.findOne({ userId: user._id })
+      .select("isOnboarded onboardedAt")
+      .lean();
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        isOnboarded: !!student?.isOnboarded,
+        onboardedAt: student?.onboardedAt || null,
+      },
+    });
   } catch (err) {
     next(err);
   }

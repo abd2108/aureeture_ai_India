@@ -1,11 +1,40 @@
 import { clerkClient, getAuth } from "@clerk/express";
 import type { Request, Response, NextFunction } from "express";
 import User from "../models/user.model";
+import { CLERK_ENABLED, NODE_ENV } from "../config";
 
 let clerkFetchWarned = false;
 
 export const syncUserMiddleware = async (req: Request, res: Response, next: NextFunction) => {
   try {
+    if (!CLERK_ENABLED) {
+      if (NODE_ENV === "production") return next();
+      const auth = (req as any).auth;
+      if (!auth?.userId) return next();
+
+      const mockEmail =
+        (req.headers["x-mock-email"] as string | undefined) ||
+        `${auth.userId}@local.test`;
+      const mockName =
+        (req.headers["x-mock-name"] as string | undefined) || "Dev User";
+
+      let user = await User.findOne({ clerkId: auth.userId });
+      if (!user) {
+        user = await User.create({
+          clerkId: auth.userId,
+          email: mockEmail,
+          name: mockName,
+        });
+      } else {
+        user.email = user.email || mockEmail;
+        user.name = user.name || mockName;
+        await user.save();
+      }
+
+      (req as any).dbUser = user;
+      return next();
+    }
+
     const auth = getAuth(req);
     if (!auth.userId) return next();
 

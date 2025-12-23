@@ -4,6 +4,7 @@ import React from "react";
 import { useRouter } from "next/navigation";
 import { useUser, useClerk } from "@clerk/nextjs";
 import { Button } from "@/components/ui/button";
+import { isClerkConfigured } from "@/lib/clerk";
 import {
   Card,
   CardHeader,
@@ -58,28 +59,17 @@ const ROLES: RoleConfig[] = [
 
 const CareerExplorerRolePage: React.FC = () => {
   const router = useRouter();
-  const { isSignedIn } = useUser();
-  const { openSignIn } = useClerk();
 
-  const handleRoleSelection = (role: RoleConfig) => {
-    if (isSignedIn) {
-      router.push(role.redirectUrl);
-    } else {
-      openSignIn({
-        forceRedirectUrl: role.redirectUrl,
-        appearance: {
-          elements: {
-            rootBox: "bg-zinc-900",
-          },
-        },
-      });
-    }
-  };
-
-  return (
+  const renderContent = (
+    handleRoleSelection: (role: RoleConfig) => void,
+    isSignedIn: boolean,
+    authNotice?: React.ReactNode,
+  ) => (
     <div className="min-h-screen bg-zinc-950 text-zinc-50 flex flex-col">
       <main className="flex-1 flex items-center justify-center px-4 py-10 md:py-16">
         <div className="w-full max-w-6xl mx-auto space-y-10">
+          {authNotice}
+
           <section className="text-center space-y-4">
             <p className="text-[11px] font-semibold tracking-[0.25em] uppercase text-zinc-500">
               Career Explorer
@@ -154,6 +144,42 @@ const CareerExplorerRolePage: React.FC = () => {
       </main>
     </div>
   );
+
+  if (!isClerkConfigured) {
+    const handleRoleSelection = (role: RoleConfig) => {
+      router.push(role.redirectUrl);
+    };
+
+    return renderContent(
+      handleRoleSelection,
+      false,
+      <div className="rounded-lg border border-amber-400/40 bg-amber-500/10 p-4 text-sm text-amber-100">
+        Clerk keys are missing. Add NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY to
+        frontend/.env.local to enable sign-in. Continuing will take you straight
+        to the selected dashboard without authentication.
+      </div>,
+    );
+  }
+
+  const { isSignedIn } = useUser();
+  const { openSignIn } = useClerk();
+
+  const handleRoleSelection = (role: RoleConfig) => {
+    if (isSignedIn) {
+      router.push(role.redirectUrl);
+    } else {
+      openSignIn({
+        forceRedirectUrl: role.redirectUrl,
+        appearance: {
+          elements: {
+            rootBox: "bg-zinc-900",
+          },
+        },
+      });
+    }
+  };
+
+  return renderContent(handleRoleSelection, isSignedIn);
 };
 
 export default CareerExplorerRolePage;

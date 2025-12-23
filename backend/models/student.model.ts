@@ -54,6 +54,8 @@ export interface IStudentPreferences {
 export interface IStudent extends Document {
   userId: Types.ObjectId;
   role: "student";
+  isOnboarded?: boolean;
+  onboardedAt?: Date | null;
   fullName?: string;
   email?: string;
   phone?: string;
@@ -129,6 +131,8 @@ const StudentSchema = new Schema<IStudent>(
   {
     userId: { type: Schema.Types.ObjectId, ref: "User", required: true, unique: true },
     role: { type: String, enum: ["student"], default: "student" },
+    isOnboarded: { type: Boolean, default: false },
+    onboardedAt: { type: Date, default: null },
     fullName: String,
     email: String,
     phone: String,

@@ -4,6 +4,7 @@ import User from "../models/user.model";
 import Student from "../models/student.model";
 import Mentor from "../models/mentor.model";
 import Founder from "../models/founder.model";
+import { CLERK_ENABLED } from "../config";
 
 /**
  * Resolves the authenticated user's role documents (student/mentor/founder)
@@ -16,7 +17,7 @@ export const roleResolverMiddleware = async (
   next: NextFunction
 ) => {
   try {
-    const auth = getAuth(req);
+    const auth = CLERK_ENABLED ? getAuth(req) : (req as any).auth;
     if (!auth.userId) return next();
 
     const user = await User.findOne({ clerkId: auth.userId }).lean();

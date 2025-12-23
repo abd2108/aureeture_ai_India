@@ -6,6 +6,7 @@ import {
   upsertFounder,
   getMentorProfile,
   getMentorOnboardingStatus,
+  getStudentOnboardingStatus,
 } from "../controllers/roleOnboarding.controller";
 
 const router = Router();
@@ -17,6 +18,7 @@ router.get("/mentor/status", getMentorOnboardingStatus);
 router.post("/mentor", upsertMentor);
 router.patch("/mentor", upsertMentor);
 router.post("/student", upsertStudent);
+router.get("/student/status", getStudentOnboardingStatus);
 router.post("/founder", upsertFounder);
 
 export default router;

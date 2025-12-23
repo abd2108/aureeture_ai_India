@@ -5,6 +5,7 @@ import { requireRole } from '../middleware/requireRole.middleware';
 import { validateRequest } from '../middleware/validate.middleware';
 import { createProfileSchema, updateProfileSchema } from '../utils/validationSchemas';
 import * as ProfileService from '../services/profile.service';
+import UserModel from '../models/user.model';
 
 const router = Router();
 
@@ -30,6 +31,45 @@ router.get('/student', requireRole("student"), async (req: any, res: any) => {
     }
     
     const profile = await ProfileService.getUserProfile(userId);
+
+    // If no profile exists yet, return a sane empty response instead of throwing
+    if (!profile) {
+      const userDoc = await UserModel.findOne({ clerkId: userId }).lean();
+      const emptyResponse = {
+        personalInfo: {
+          name: userDoc?.name || '',
+          email: userDoc?.email || '',
+          phone: '',
+          location: '',
+          linkedin: '',
+        },
+        careerSnapshot: {
+          careerStage: '',
+          longTermGoal: '',
+          currentRole: '',
+          currentCompany: '',
+          joinDate: '',
+        },
+        timelineItems: [],
+        skills: [],
+        tasks: {
+          todo: [],
+          later: [],
+          done: [],
+        },
+        careerGoals: [],
+        analytics: {
+          profileCompletion: 0,
+          skillScore: 0,
+          views: 0,
+          connects: 0,
+          applications: 0,
+          matches: 0,
+        },
+      };
+
+      return res.status(200).json({ success: true, data: emptyResponse });
+    }
 
     // Format timeline items from workHistory, education, and projects
     const timelineItems: any[] = [];

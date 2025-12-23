@@ -48,6 +48,7 @@ export default function StudentSettingsPage() {
   const { user, isLoaded: isUserLoaded } = useUser();
   const [loading, setLoading] = useState(true);
   const [submitState, setSubmitState] = useState<"idle" | "saving">("idle");
+  const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || "";
 
   const {
@@ -87,82 +88,89 @@ export default function StudentSettingsPage() {
     },
   });
 
+  const loadProfile = async () => {
+    try {
+      const token = await getToken();
+      const endpoint = apiBase
+        ? `${apiBase}/api/student/profile`
+        : "/api/student/profile";
+
+      const res = await fetch(endpoint, {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          "x-active-role": "student",
+        },
+        credentials: "include",
+      });
+
+      if (!res.ok) {
+        return;
+      }
+
+      const data = await res.json();
+      const profile = data?.data;
+      reset({
+        fullName: profile?.fullName || user?.fullName || "",
+        email:
+          profile?.email ||
+          user?.primaryEmailAddress?.emailAddress ||
+          user?.emailAddresses?.[0]?.emailAddress ||
+          "",
+        phone: profile?.phone || "",
+        linkedinUrl: profile?.linkedinUrl || "",
+        city: profile?.location?.city || "",
+        country: profile?.location?.country || "",
+        timezone: profile?.location?.timezone || "",
+        workAuthorization: profile?.location?.workAuthorization || "",
+        resumeFile: profile?.resumeFile || "",
+        skillsText: (profile?.skills || []).join(", "),
+        domainsText: (profile?.preferences?.domains || []).join(", "),
+        educationsText: (profile?.educations || [])
+          .map((e: any) => `${e.school}|${e.degree}|${e.major}|${e.startYear}|${e.endYear}`)
+          .join("\n"),
+        experiencesText: (profile?.experiences || [])
+          .map((e: any) => `${e.company}|${e.role}|${e.city}|${e.country}|${e.startDate}|${e.endDate}|${e.description || ""}`)
+          .join("\n"),
+        projectsText: (profile?.projects || [])
+          .map((p: any) => `${p.name}|${p.startYear}|${p.endYear}|${p.description || ""}`)
+          .join("\n"),
+        awards: profile?.awards || "",
+        portfolio: profile?.links?.portfolio || "",
+        github: profile?.links?.github || "",
+        leetcode: profile?.links?.leetcode || "",
+        codechef: profile?.links?.codechef || "",
+        otherLink: profile?.links?.other || "",
+        workModel: profile?.preferences?.workModel || "",
+        salaryMin: profile?.preferences?.salaryRange?.min,
+        salaryMax: profile?.preferences?.salaryRange?.max,
+        salaryCurrency: profile?.preferences?.salaryRange?.currency || "INR",
+        openToInternships: profile?.preferences?.openToInternships || false,
+        openToRelocation: profile?.preferences?.openToRelocation || false,
+      });
+    } catch (err) {
+      console.error("Failed to load student settings", err);
+    }
+  };
+
   useEffect(() => {
-    const load = async () => {
+    const run = async () => {
       try {
-        const token = await getToken();
-        const endpoint = apiBase
-          ? `${apiBase}/api/student/profile`
-          : "/api/student/profile";
-
-        const res = await fetch(endpoint, {
-          method: "GET",
-          headers: {
-            "Content-Type": "application/json",
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
-          credentials: "include",
-        });
-
-        if (!res.ok) {
-          setLoading(false);
-          return;
-        }
-
-        const data = await res.json();
-        const profile = data?.data;
-        reset({
-          fullName: profile?.fullName || user?.fullName || "",
-          email:
-            profile?.email ||
-            user?.primaryEmailAddress?.emailAddress ||
-            user?.emailAddresses?.[0]?.emailAddress ||
-            "",
-          phone: profile?.phone || "",
-          linkedinUrl: profile?.linkedinUrl || "",
-          city: profile?.location?.city || "",
-          country: profile?.location?.country || "",
-          timezone: profile?.location?.timezone || "",
-          workAuthorization: profile?.location?.workAuthorization || "",
-          resumeFile: profile?.resumeFile || "",
-          skillsText: (profile?.skills || []).join(", "),
-          domainsText: (profile?.preferences?.domains || []).join(", "),
-          educationsText: (profile?.educations || [])
-            .map((e: any) => `${e.school}|${e.degree}|${e.major}|${e.startYear}|${e.endYear}`)
-            .join("\n"),
-          experiencesText: (profile?.experiences || [])
-            .map((e: any) => `${e.company}|${e.role}|${e.city}|${e.country}|${e.startDate}|${e.endDate}|${e.description || ""}`)
-            .join("\n"),
-          projectsText: (profile?.projects || [])
-            .map((p: any) => `${p.name}|${p.startYear}|${p.endYear}|${p.description || ""}`)
-            .join("\n"),
-          awards: profile?.awards || "",
-          portfolio: profile?.links?.portfolio || "",
-          github: profile?.links?.github || "",
-          leetcode: profile?.links?.leetcode || "",
-          codechef: profile?.links?.codechef || "",
-          otherLink: profile?.links?.other || "",
-          workModel: profile?.preferences?.workModel || "",
-          salaryMin: profile?.preferences?.salaryRange?.min,
-          salaryMax: profile?.preferences?.salaryRange?.max,
-          salaryCurrency: profile?.preferences?.salaryRange?.currency || "INR",
-          openToInternships: profile?.preferences?.openToInternships || false,
-          openToRelocation: profile?.preferences?.openToRelocation || false,
-        });
-      } catch (err) {
-        console.error("Failed to load student settings", err);
+        await loadProfile();
       } finally {
         setLoading(false);
       }
     };
 
     if (isUserLoaded) {
-      load();
+      run();
     }
   }, [apiBase, getToken, isUserLoaded, reset, user]);
 
   const onSubmit = async (values: FormValues) => {
     setSubmitState("saving");
+    setSaveMessage(null);
     try {
       const token = await getToken();
       const endpoint = apiBase
@@ -254,6 +262,7 @@ export default function StudentSettingsPage() {
         headers: {
           "Content-Type": "application/json",
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          "x-active-role": "student",
         },
         credentials: "include",
         body: JSON.stringify(payload),
@@ -263,6 +272,9 @@ export default function StudentSettingsPage() {
         const errBody = await res.json().catch(() => null);
         throw new Error(errBody?.message || "Failed to save settings");
       }
+
+      await loadProfile();
+      setSaveMessage("Profile saved successfully.");
     } catch (err: any) {
       console.error("Failed to save student settings", err);
       alert(err?.message || "Could not save settings. Please try again.");
@@ -293,6 +305,11 @@ export default function StudentSettingsPage() {
         </CardHeader>
         <CardContent className="space-y-6">
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
+            {saveMessage && (
+              <div className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200">
+                {saveMessage}
+              </div>
+            )}
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
                 <Label>Full name</Label>
